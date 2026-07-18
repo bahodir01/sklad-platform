@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "",
+    "indexed_at": "2026-07-18T08:57:01Z",
+    "project": "sklad-backend",
+    "nodes": 663,
+    "edges": 3245,
+    "original_size": 2686976,
+    "compressed_size": 474752,
+    "compression_level": 9
+}

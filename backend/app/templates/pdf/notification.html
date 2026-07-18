@@ -1,0 +1,168 @@
+{#
+  BILDIRISHNOMA — печатная форма документа-уведомления.
+  Рендер: WeasyPrint (HTML → PDF), см. ТЗ §2.1 «Печатные формы».
+
+  Правило заполнения: всё, что лежит в структуре БД, сюда только подставляется.
+  Товары приходят из notification_items и НИКОГДА не дублируются в тексте абзаца —
+  иначе текст и перечень разойдутся.
+
+  Переменные контекста:
+    org.addressee_line1/2  — кому, целыми строками (см. ниже про окончания)
+    org.sender_line1/2     — от кого, целыми строками
+    org.signer_position    — должность в строке подписи
+    org.signer_name        — ФИО в строке подписи
+    n                      — ORM-объект Notification, поля называются как колонки:
+      n.body_text          — абзац-обращение, редактируемый (скриншот 1)
+      n.division_name      — Bo'linma nomi
+      n.comment            — Ehtiyojning asoslanishi, причина покупки (скриншот 3)
+    items[]                — .product_name / .qty / .unit_code (скриншот 2)
+                             unit_code тянется из products.unit_id: в
+                             notification_items единицы нет и быть не должно
+
+  Имена переменных = имена колонок, промежуточного маппинга нет намеренно.
+  Раньше здесь стояло n.justification — читалось лучше, но заставляло сервис
+  помнить, что justification это comment. Такой маппинг забывается ровно один
+  раз и молча печатает пустую ячейку.
+
+  Шапка хранится целыми строками, а не «ФИО + окончание». В узбекском аффикс
+  зависит от последней буквы основы: Umarova+ga, но Ahmad+ga / Yo‘ldosh+qa.
+  Клеить окончание в шаблоне — значит однажды напечатать в официальном
+  документе неверную форму. Окончание входит в саму настройку.
+#}
+<!-- Times New Roman — системный на Windows-машине заказчика; WeasyPrint
+     подхватит его из системы. Подменять на веб-шрифт нельзя: бланк
+     согласован с заказчиком именно в этой гарнитуре. -->
+<style>
+  @page {
+    size: A4;
+    margin: 2cm 1.5cm 2cm 3cm;   /* левое поле шире — под подшивку в папку */
+  }
+
+  body {
+    font-family: "Times New Roman", "Liberation Serif", serif;
+    font-size: 14pt;
+    line-height: 1.15;
+    color: #000;
+  }
+
+  /* ── Шапка: адресат и отправитель, прижаты вправо ── */
+  .addressee {
+    width: 46%;
+    margin-left: 54%;
+    text-align: center;
+  }
+  .addressee p        { margin: 0; }
+  .addressee .from    { margin-top: 14pt; }
+
+  /* ── Заголовок ── */
+  h1 {
+    margin: 42pt 0 18pt;
+    font-size: 14pt;
+    font-weight: bold;
+    text-align: center;
+    letter-spacing: .02em;
+  }
+
+  /* ── Абзац-обращение: выключка по ширине, красная строка ── */
+  .body-text {
+    margin: 0 0 14pt;
+    text-align: justify;
+    text-indent: 1.25cm;
+    hyphens: auto;
+  }
+
+  /* ── Таблица: слева подпись поля, справа значение ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  td {
+    border: 0.75pt solid #000;
+    padding: 5pt 7pt;
+    vertical-align: top;
+  }
+  td.label { width: 52%; }
+  td.value { width: 48%; }
+
+  /* Первая строка — подразделение, обе ячейки жирные и по центру */
+  tr.division td {
+    font-weight: bold;
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  /* Ячейки под заполнение держат высоту, даже если пусты */
+  tr.goods td, tr.reason td { height: 2.6cm; }
+
+  td .hint { font-style: italic; }
+
+  /* Перечень товаров внутри одной ячейки — по одной позиции в строку */
+  .goods-list { margin: 0; padding: 0; list-style: none; }
+  .goods-list li { margin: 0 0 2pt; }
+  .goods-list .qty { white-space: nowrap; }
+
+  /* ── Подпись ── */
+  .signature {
+    margin-top: 40pt;
+    width: 100%;
+    border: 0;
+    table-layout: fixed;
+  }
+  .signature td {
+    border: 0;
+    padding: 0;
+  }
+  .signature .position { text-align: left; }
+  .signature .name     { text-align: right; }
+</style>
+
+<div class="addressee">
+  <p>{{ org.addressee_line1 }}</p>
+  <p>{{ org.addressee_line2 }}</p>
+  <p class="from">{{ org.sender_line1 }}</p>
+  <p>{{ org.sender_line2 }}</p>
+</div>
+
+<h1>BILDIRISHNOMA</h1>
+
+{# Абзац редактируется администратором при создании уведомления.
+   В шаблон приходит уже готовым — здесь только выводится. #}
+<p class="body-text">{{ n.body_text }}</p>
+
+<table>
+  <tr class="division">
+    <td class="label">Bo‘linma nomi</td>
+    <td class="value">{{ n.division_name }}</td>
+  </tr>
+
+  <tr class="goods">
+    <td class="label">
+      Tovar (xizmat)ning nomi, texnik tasnifi va soni
+      (<span class="hint">brend ko‘rsatilmasin</span>)
+    </td>
+    <td class="value">
+      {# Единственный источник — notification_items. Руками сюда не пишут. #}
+      <ul class="goods-list">
+        {% for i in items %}
+          <li>{{ i.product_name }} — <span class="qty">{{ i.qty }} {{ i.unit_code }}</span></li>
+        {% endfor %}
+      </ul>
+    </td>
+  </tr>
+
+  <tr class="reason">
+    <td class="label">
+      Ehtiyojning asoslanishi
+      (<span class="hint">buyruq, bayon, tasdiqlangan ish reja, topshiriq va hk.</span>)
+    </td>
+    <td class="value">{{ n.comment }}</td>
+  </tr>
+</table>
+
+<table class="signature">
+  <tr>
+    <td class="position">{{ org.signer_position }}</td>
+    <td class="name">{{ org.signer_name }}</td>
+  </tr>
+</table>

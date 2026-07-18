@@ -1,0 +1,24 @@
+{
+  "feature": "Платформа складского учёта, документооборота и учёта денежных средств",
+  "status": "in_progress",
+  "methodology": "traditional",
+  "complexity": "complex",
+  "current_step": 4,
+  "current_phase": 2,
+  "completed_steps": [
+    1,
+    2,
+    3,
+    "checkpoint-1"
+  ],
+  "files_created": [
+    "01-requirements.md",
+    "02-database.md",
+    "02-data-dictionary.xlsx",
+    "02-contract.json",
+    "03-architecture.md"
+  ],
+  "notes": "Chekpoint-1 utverzhden 17.07. OV-2 zakryt: zhestkaya blokirovka, CHECK(balance>=0) ostaetsya, shema finalna. Kontrakt zamorozhen. Etap 1 (fundament: auth, RBAC, M1) v rabote.",
+  "started_at": "2026-07-17T15:35:16.379524",
+  "last_updated": "2026-07-17T16:07:47.653575"
+}

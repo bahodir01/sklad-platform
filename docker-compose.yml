@@ -1,0 +1,124 @@
+# dev-окружение этапа 1: api, db, redis, minio.
+#
+# worker/beat (Celery) и nginx из архитектуры §3 здесь ещё нет: фоновые
+# задачи появляются с этапа 3 (PDF), а TLS-терминация — забота prod-compose.
+# Класть их сейчас пустыми контейнерами — держать в репозитории то,
+# что никто не запускает и не чинит.
+
+name: sklad
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sklad:sklad@db:5432/sklad
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
+      ENVIRONMENT: dev
+      DEBUG: "true"
+      # В dev фронт ходит по http://localhost — Secure-cookie браузер бы не отдал.
+      # В prod это значение обязано быть true (ТЗ §7: HTTPS).
+      REFRESH_COOKIE_SECURE: "false"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      CORS_ORIGINS: '["http://localhost:5173"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      # Живая перезагрузка кода в dev; в prod-compose тома нет.
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sklad
+      POSTGRES_PASSWORD: sklad
+      POSTGRES_DB: sklad
+      # C.UTF-8 — детерминированная сортировка; локаль-зависимый порядок
+      # ломал бы одинаковость выдачи справочников между машинами.
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sklad -d sklad"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # appendonly: refresh-сессии переживают рестарт контейнера — иначе
+    # каждый деплой разлогинивал бы всех (ТЗ §7: refresh живёт 30 дней).
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Бакеты receipts/documents — приватные (ТЗ §7: чек это финансовый
+  # документ, публичная ссылка недопустима). Отдача — presigned URL, TTL 5 мин.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb --ignore-existing local/receipts &&
+      mc mb --ignore-existing local/documents &&
+      mc anonymous set none local/receipts &&
+      mc anonymous set none local/documents &&
+      echo 'Бакеты готовы: receipts, documents (приватные)'
+      "
+    restart: "no"
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Окружение: .env содержит JWT_SECRET и пароли БД — в репозиторий не попадает.
+# Шаблон без секретов — .env.example.
+.env
+.env.local
+
+# Инструменты
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# ОС
+.DS_Store
+Thumbs.db
+
+# Node / frontend
+node_modules/
+.vite/
+*.tsbuildinfo
+
+# Codebase memory: артефакт graph.db.zst коммитим (переносимый снимок графа),
+# локальную рабочую БД — нет.
+.codebase-memory/graph.db
+
+# Артефакты сборки
+build/
+dist/

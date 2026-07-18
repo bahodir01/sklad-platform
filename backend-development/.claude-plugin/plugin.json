@@ -1,0 +1,10 @@
+{
+  "name": "backend-development",
+  "version": "1.9.0",
+  "description": "Full-stack feature delivery: requirements analysis, database schema design with a shared contract, backend and frontend implementation, visual design routing (web/app/3D), QA and test automation, and Temporal workflow orchestration",
+  "author": {
+    "name": "Seth Hobson",
+    "email": "seth@major7apps.com"
+  },
+  "license": "MIT"
+}

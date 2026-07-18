@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ title }}</title>
+  <style>
+    @page { size: A4 landscape; margin: 14mm; }
+    body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 10px; color: #111; }
+    h1 { font-size: 15px; margin: 0 0 4px; }
+    .meta { color: #555; font-size: 9px; margin-bottom: 10px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #999; padding: 3px 5px; text-align: left; vertical-align: top; }
+    th { background: #eee; font-weight: bold; }
+    td.num { text-align: right; }
+    .summary { margin-top: 14px; }
+    .summary table { width: auto; }
+    .summary th { background: #f5f5f5; }
+  </style>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  <div class="meta">Сформировано: {{ generated_at }} · строк: {{ rows|length }}</div>
+
+  <table>
+    <thead>
+      <tr>
+        {% for col in columns %}<th>{{ col.header }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        {% for col in columns %}
+        <td class="{{ 'num' if col.numeric else '' }}">
+          {%- set v = row.get(col.key) -%}
+          {{ '' if v is none else v }}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if summary %}
+  <div class="summary">
+    <table>
+      {% for label, value in summary %}
+      <tr><th>{{ label }}</th><td class="num">{{ value }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+</body>
+</html>

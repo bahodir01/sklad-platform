@@ -1,0 +1,16 @@
+{
+  "name": "backend-development",
+  "version": "1.9.0",
+  "description": "Full-stack feature delivery: requirements analysis, database schema design with a shared contract, backend and frontend implementation, visual design routing (web/app/3D), QA and test automation, and Temporal workflow orchestration",
+  "skills": "./skills/",
+  "author": {
+    "name": "Seth Hobson",
+    "email": "seth@major7apps.com"
+  },
+  "license": "MIT",
+  "interface": {
+    "displayName": "Backend Development",
+    "shortDescription": "Backend API design, GraphQL architecture, workflow orchestration with Temporal, and test-driven backend development",
+    "category": "Coding"
+  }
+}

@@ -1,0 +1,169 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Дизайн-токены заказчика (.feature-dev/05-design-tokens.json, style
+ * "modern-with-accent", бирюзовый акцент). Значения хекс-токенов переведены в
+ * HSL и разложены по семантическим переменным shadcn — так ВСЕ существующие
+ * компоненты (button, badge, input, select, dialog…) принимают палитру без
+ * правок. Плюс отдельные семантические переменные статусов (success/warning/
+ * info) и бренд-акцента для sidebar/бейджей.
+ *
+ * Хардкод цветов и «магических» пикселей в компонентах запрещён — только эти
+ * переменные и утилиты Tailwind. Правка палитры = правка ЭТОГО файла.
+ *
+ * Темы: светлая (:root) и тёмная. Тёмная включается классом .dark ИЛИ атрибутом
+ * [data-theme="dark"] (их ставит ThemeProvider), а также системной темой
+ * (prefers-color-scheme) как фолбэк до гидрации/при system-режиме.
+ */
+@layer base {
+  :root {
+    /* поверхности / текст */
+    --background: 210 20% 96%; /* surface-app #F4F6F8 */
+    --foreground: 207 22% 10%; /* text-primary #141A1F */
+    --card: 0 0% 100%; /* surface-panel #FFFFFF */
+    --card-foreground: 207 22% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 207 22% 10%;
+
+    /* бренд-акцент (бирюза) → primary */
+    --primary: 186 82% 30%; /* accent #0D7D8A */
+    --primary-foreground: 0 0% 100%;
+
+    /* нейтральные */
+    --secondary: 210 16% 93%; /* surface-sunken */
+    --secondary-foreground: 209 18% 25%;
+    --muted: 210 16% 94%;
+    --muted-foreground: 210 10% 45%; /* text-muted #7C8894 */
+    --accent: 200 20% 95%; /* surface-hover (нейтральный ховер shadcn, НЕ бренд) */
+    --accent-foreground: 207 22% 10%;
+
+    --destructive: 6 59% 44%; /* danger #B23A2E */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 21% 89%; /* border #DCE2E8 */
+    --input: 210 21% 89%;
+    --ring: 186 82% 30%; /* focus-ring = accent */
+    --radius: 0.5rem; /* radius.md 8px */
+
+    /* семантика статусов (отдельно от акцента — см. philosophy токенов) */
+    --success: 146 59% 30%; /* #1F7A46 */
+    --success-foreground: 0 0% 100%;
+    --success-soft: 137 33% 90%; /* #DCEEE2 */
+    --success-soft-foreground: 146 55% 24%;
+    --warning: 36 79% 34%; /* #9A6412 */
+    --warning-foreground: 0 0% 100%;
+    --warning-soft: 39 62% 88%; /* #F5E7CE */
+    --warning-soft-foreground: 36 79% 28%;
+    --info: 213 57% 38%; /* #2A5C9A */
+    --info-foreground: 0 0% 100%;
+    --info-soft: 214 55% 91%; /* #DCE7F4 */
+    --info-soft-foreground: 213 57% 32%;
+
+    /* мягкий бренд для активного пункта меню / бейджей */
+    --brand-soft: 185 40% 90%; /* accent-soft #DBEEF0 */
+    --brand-text: 186 84% 19%; /* accent-text #08525A */
+  }
+
+  .dark,
+  [data-theme="dark"] {
+    --background: 210 29% 7%; /* surface-app #0C1116 */
+    --foreground: 208 30% 92%; /* text-primary #E7EDF2 */
+    --card: 210 27% 10%; /* surface-panel #131A21 */
+    --card-foreground: 208 30% 92%;
+    --popover: 210 27% 10%;
+    --popover-foreground: 208 30% 92%;
+
+    --primary: 186 52% 49%; /* accent #3BB0BD */
+    --primary-foreground: 210 40% 8%; /* тёмный текст на ярком бирюзовом */
+
+    --secondary: 209 26% 14%;
+    --secondary-foreground: 209 20% 80%;
+    --muted: 209 26% 14%;
+    --muted-foreground: 208 12% 55%; /* text-muted #6D7C89 */
+    --accent: 209 28% 15%; /* surface-hover #1C2731 */
+    --accent-foreground: 208 30% 92%;
+
+    --destructive: 7 66% 64%; /* danger #E07567 */
+    --destructive-foreground: 210 40% 8%;
+
+    --border: 209 24% 19%; /* border #25313C */
+    --input: 209 24% 19%;
+    --ring: 186 52% 49%;
+
+    --success: 146 39% 51%; /* #4FB479 */
+    --success-foreground: 210 40% 8%;
+    --success-soft: 141 39% 13%; /* #15301F */
+    --success-soft-foreground: 146 45% 65%;
+    --warning: 38 63% 56%; /* #D6A24A */
+    --warning-foreground: 210 40% 8%;
+    --warning-soft: 38 48% 14%; /* #332612 */
+    --warning-soft-foreground: 38 63% 62%;
+    --info: 213 66% 65%; /* #6AA0E0 */
+    --info-foreground: 210 40% 8%;
+    --info-soft: 214 46% 15%; /* #152538 */
+    --info-soft-foreground: 213 66% 70%;
+
+    --brand-soft: 191 51% 15%; /* accent-soft #123138 */
+    --brand-text: 186 55% 72%; /* accent-text #8FD9E1 */
+  }
+
+  /* Системная тёмная тема как фолбэк, пока ThemeProvider не проставил класс/атрибут. */
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light):not([data-theme="light"]) {
+      --background: 210 29% 7%;
+      --foreground: 208 30% 92%;
+      --card: 210 27% 10%;
+      --card-foreground: 208 30% 92%;
+      --popover: 210 27% 10%;
+      --popover-foreground: 208 30% 92%;
+      --primary: 186 52% 49%;
+      --primary-foreground: 210 40% 8%;
+      --secondary: 209 26% 14%;
+      --secondary-foreground: 209 20% 80%;
+      --muted: 209 26% 14%;
+      --muted-foreground: 208 12% 55%;
+      --accent: 209 28% 15%;
+      --accent-foreground: 208 30% 92%;
+      --destructive: 7 66% 64%;
+      --destructive-foreground: 210 40% 8%;
+      --border: 209 24% 19%;
+      --input: 209 24% 19%;
+      --ring: 186 52% 49%;
+      --success: 146 39% 51%;
+      --success-foreground: 210 40% 8%;
+      --success-soft: 141 39% 13%;
+      --success-soft-foreground: 146 45% 65%;
+      --warning: 38 63% 56%;
+      --warning-foreground: 210 40% 8%;
+      --warning-soft: 38 48% 14%;
+      --warning-soft-foreground: 38 63% 62%;
+      --info: 213 66% 65%;
+      --info-foreground: 210 40% 8%;
+      --info-soft: 214 46% 15%;
+      --info-soft-foreground: 213 66% 70%;
+      --brand-soft: 191 51% 15%;
+      --brand-text: 186 55% 72%;
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Skip-link — виден только при фокусе с клавиатуры (доступность §11). */
+.skip-link {
+  @apply sr-only;
+}
+.skip-link:focus {
+  @apply not-sr-only fixed left-4 top-4 z-50 rounded-md bg-primary px-4 py-2 text-primary-foreground;
+}

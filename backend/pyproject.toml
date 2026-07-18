@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# Явный список: рядом с app/ лежит alembic/, и автопоиск setuptools
+# на такой раскладке падает с «Multiple top-level packages discovered».
+include = ["app*"]
+
+[project]
+name = "sklad-backend"
+version = "0.1.0"
+description = "Платформа складского учёта — backend (FastAPI + SQLAlchemy 2.0 + Alembic + PostgreSQL 16)"
+requires-python = ">=3.12"
+
+# ВНИМАНИЕ (ТЗ §0, §2.1 — согласовано подписью заказчика):
+# Django / DRF в этом проекте ЗАПРЕЩЕНЫ. Стек зафиксирован:
+#   SQLAlchemy 2.0 · Alembic · Pydantic v2 · FastAPI · PostgreSQL 16
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "gunicorn>=23.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pyjwt>=2.10",
+    "argon2-cffi>=23.1",
+    "redis>=5.2",
+    "python-multipart>=0.0.17",
+    # Печатные формы (ТЗ §2.1, архитектура §8). Импортируется ЛЕНИВО в
+    # shared/pdf.py: при отсутствии нативных зависимостей (pango/cairo) на
+    # dev-машине приложение не падает, PDF-эндпоинт отдаёт HTML-фолбэк.
+    "jinja2>=3.1",
+    "weasyprint>=63",
+    # Экспорт отчётов в Excel (ТЗ §8.1.1/§8.2, М6). openpyxl — чистый Python, без
+    # нативных зависимостей; PDF-ветку экспорта делает WeasyPrint (выше).
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.28",
+    "testcontainers[postgres]>=4.8",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S"]
+ignore = [
+    "S101",  # assert — нормален в тестах
+    # Depends()/Query() в значении по умолчанию — это и есть способ объявить
+    # зависимость в FastAPI, а не «мутабельный дефолт» из bugbear.
+    "B008",
+    # str+Enum вместо StrEnum: модели перенесены из 02-database.md §6 дословно,
+    # и расхождение с эталоном дороже стилистической выгоды. SAEnum работает
+    # с обоими одинаково.
+    "UP042",
+    # Generic[T] вместо PEP 695: дженерик-модели Pydantic v2 объявляются именно так.
+    "UP046",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# S105: «minioadmin» и «bearer» — не пароли. Первое — dev-дефолт, который
+# в prod приходит из окружения; второе — название схемы авторизации.
+"app/core/config.py" = ["S105"]
+"app/modules/auth/schemas.py" = ["S105"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# Один event loop на всю сессию тестов: app.core.database.engine — модульный
+# синглтон с пулом соединений asyncpg, создаваемым при импорте. Loop per-test
+# (дефолт pytest-asyncio) рвёт пул между тестами — соединение, открытое в
+# loop теста A, при переиспользовании в loop теста B падает с
+# "attached to a different loop". Session-scope loop держит один и тот же
+# event loop на весь прогон, как и сам engine.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]

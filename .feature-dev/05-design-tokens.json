@@ -1,0 +1,95 @@
+{
+  "$meta": {
+    "project": "Платформа складского учёта",
+    "branch": "APP / interface-designer",
+    "style_preset": "modern-with-accent",
+    "themes": ["light", "dark"],
+    "philosophy": "Плотность и читаемость важнее воздуха. Таблицы, статусы и формы — first-class. Акцент один, семантика статусов отдельно.",
+    "density": "compact-default"
+  },
+  "color": {
+    "light": {
+      "surface-app": "#F4F6F8",
+      "surface-panel": "#FFFFFF",
+      "surface-raised": "#FFFFFF",
+      "surface-sunken": "#EDF0F3",
+      "surface-hover": "#F0F3F5",
+      "border": "#DCE2E8",
+      "border-strong": "#C3CCD5",
+      "text-primary": "#141A1F",
+      "text-secondary": "#4A5763",
+      "text-muted": "#7C8894",
+      "accent": "#0D7D8A",
+      "accent-hover": "#0A656F",
+      "accent-soft": "#DBEEF0",
+      "accent-text": "#08525A",
+      "success": "#1F7A46",
+      "success-soft": "#DCEEE2",
+      "warning": "#9A6412",
+      "warning-soft": "#F5E7CE",
+      "danger": "#B23A2E",
+      "danger-soft": "#F4DDD9",
+      "info": "#2A5C9A",
+      "info-soft": "#DCE7F4",
+      "focus-ring": "#0D7D8A"
+    },
+    "dark": {
+      "surface-app": "#0C1116",
+      "surface-panel": "#131A21",
+      "surface-raised": "#182129",
+      "surface-sunken": "#0E141A",
+      "surface-hover": "#1C2731",
+      "border": "#25313C",
+      "border-strong": "#374654",
+      "text-primary": "#E7EDF2",
+      "text-secondary": "#A7B4C0",
+      "text-muted": "#6D7C89",
+      "accent": "#3BB0BD",
+      "accent-hover": "#57C2CE",
+      "accent-soft": "#123138",
+      "accent-text": "#8FD9E1",
+      "success": "#4FB479",
+      "success-soft": "#15301F",
+      "warning": "#D6A24A",
+      "warning-soft": "#332612",
+      "danger": "#E07567",
+      "danger-soft": "#361A16",
+      "info": "#6AA0E0",
+      "info-soft": "#152538",
+      "focus-ring": "#3BB0BD"
+    }
+  },
+  "typography": {
+    "font-sans": "'Inter', 'Segoe UI', system-ui, sans-serif",
+    "font-mono": "'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace",
+    "scale": {
+      "display": "24px/1.2 700",
+      "h1": "20px/1.25 650",
+      "h2": "16px/1.3 620",
+      "body": "13.5px/1.5 400",
+      "body-strong": "13.5px/1.5 560",
+      "label": "12px/1.4 560",
+      "caption": "11px/1.4 500 +0.02em",
+      "data": "13px/1.4 500 tabular-nums"
+    }
+  },
+  "spacing": { "unit": "4px", "scale": [0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64] },
+  "radius": { "xs": "4px", "sm": "6px", "md": "8px", "lg": "12px", "pill": "999px" },
+  "shadow": {
+    "light": {
+      "sm": "0 1px 2px rgba(20,26,31,.06)",
+      "md": "0 2px 8px rgba(20,26,31,.08)",
+      "lg": "0 8px 28px rgba(20,26,31,.12)"
+    },
+    "dark": {
+      "sm": "0 1px 2px rgba(0,0,0,.4)",
+      "md": "0 2px 10px rgba(0,0,0,.5)",
+      "lg": "0 10px 34px rgba(0,0,0,.6)"
+    }
+  },
+  "status": {
+    "notification": { "draft": "muted", "in_progress": "info", "closed": "success" },
+    "request": { "draft": "muted", "to_print": "warning", "printed": "info", "issued": "success" },
+    "catalog": { "active": "success", "archived": "muted" }
+  }
+}

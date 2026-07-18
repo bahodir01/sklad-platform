@@ -1,0 +1,165 @@
+{
+  "views": [
+    {
+      "name": "UnitsTable",
+      "table": "units",
+      "kind": "list",
+      "fields": [
+        "code",
+        "name",
+        "is_active"
+      ]
+    },
+    {
+      "name": "UnitCreateForm",
+      "table": "units",
+      "kind": "create",
+      "fields": [
+        "code",
+        "name"
+      ]
+    },
+    {
+      "name": "UnitEditForm",
+      "table": "units",
+      "kind": "update",
+      "fields": [
+        "code",
+        "name",
+        "is_active"
+      ]
+    },
+    {
+      "name": "ProductsTable",
+      "table": "products",
+      "kind": "list",
+      "fields": [
+        "name",
+        "unit_id",
+        "sku",
+        "status"
+      ]
+    },
+    {
+      "name": "ProductCreateForm",
+      "table": "products",
+      "kind": "create",
+      "fields": [
+        "name",
+        "unit_id",
+        "sku"
+      ]
+    },
+    {
+      "name": "ProductEditForm",
+      "table": "products",
+      "kind": "update",
+      "fields": [
+        "name",
+        "sku",
+        "status"
+      ]
+    },
+    {
+      "name": "WarehousesTable",
+      "table": "warehouses",
+      "kind": "list",
+      "fields": [
+        "code",
+        "name",
+        "allows_issuance",
+        "status"
+      ]
+    },
+    {
+      "name": "WarehouseDetail",
+      "table": "warehouses",
+      "kind": "detail",
+      "fields": [
+        "code",
+        "name",
+        "address",
+        "allows_issuance",
+        "status"
+      ]
+    },
+    {
+      "name": "WarehouseCreateForm",
+      "table": "warehouses",
+      "kind": "create",
+      "fields": [
+        "code",
+        "name",
+        "address",
+        "allows_issuance"
+      ]
+    },
+    {
+      "name": "WarehouseEditForm",
+      "table": "warehouses",
+      "kind": "update",
+      "fields": [
+        "code",
+        "name",
+        "address",
+        "allows_issuance",
+        "status"
+      ]
+    },
+    {
+      "name": "ExpenseTypesTable",
+      "table": "expense_types",
+      "kind": "list",
+      "fields": [
+        "name",
+        "requires_employee",
+        "status"
+      ]
+    },
+    {
+      "name": "ExpenseTypeCreateForm",
+      "table": "expense_types",
+      "kind": "create",
+      "fields": [
+        "name",
+        "requires_employee"
+      ]
+    },
+    {
+      "name": "ExpenseTypeEditForm",
+      "table": "expense_types",
+      "kind": "update",
+      "fields": [
+        "name",
+        "requires_employee",
+        "status"
+      ]
+    },
+    {
+      "name": "ExpenseCategoriesTable",
+      "table": "expense_categories",
+      "kind": "list",
+      "fields": [
+        "name",
+        "status"
+      ]
+    },
+    {
+      "name": "ExpenseCategoryCreateForm",
+      "table": "expense_categories",
+      "kind": "create",
+      "fields": [
+        "name"
+      ]
+    },
+    {
+      "name": "ExpenseCategoryEditForm",
+      "table": "expense_categories",
+      "kind": "update",
+      "fields": [
+        "name",
+        "status"
+      ]
+    }
+  ]
+}
