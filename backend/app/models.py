@@ -29,7 +29,13 @@ from app.modules.documents.models import (
     Transfer,
     TransferItem,
 )
-from app.modules.issuance.models import Request, RequestItem, Writeoff, WriteoffItem
+from app.modules.issuance.models import (
+    Request,
+    RequestItem,
+    SignatureBatch,
+    Writeoff,
+    WriteoffItem,
+)
 from app.modules.stock.models import StockBalance, StockMovement
 
 __all__ = [
@@ -51,11 +57,12 @@ __all__ = [
     # М3. Ядро учёта (2)
     "StockMovement",
     "StockBalance",
-    # М4. Заявки и проводки (4)
+    # М4. Заявки и проводки (5, +SignatureBatch — фича 13)
     "Writeoff",
     "WriteoffItem",
     "Request",
     "RequestItem",
+    "SignatureBatch",
     # М5. Кассы и деньги (3)
     "CashDesk",
     "MoneyIncome",
@@ -64,4 +71,5 @@ __all__ = [
     "AuditLog",
 ]
 
-# 6 + 6 + 2 + 4 + 3 + 1 = 22 таблицы — ровно столько, сколько в 02-contract.json.
+# 6 + 6 + 2 + 5 + 3 + 1 = 23 таблицы (фича 13 добавила signature_batches) —
+# ровно столько, сколько в 02-contract.json.

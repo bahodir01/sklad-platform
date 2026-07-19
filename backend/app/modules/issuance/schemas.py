@@ -11,10 +11,15 @@ Update-схем нет: у requests/writeoffs НЕТ ни одного update=tr
 Карта флагов (перенос из контракта):
 
   requests        List (get_index): id number employee_id warehouse_id status
-                                    issued_at writeoff_id created_at
+                                    issued_at writeoff_id created_at batch_id
+                                    submitted_at submitted_register_no
                   Read (get_single): + reason printed_at pdf_url
                   Create: warehouse_id, reason (+ items)
                   Update: — (нет ни одного update=true)
+
+  Фича 13 (спека §2-§4): статусы draft→to_issue→issued→signed→submitted;
+  batch_id/submitted_at/submitted_register_no — server-managed read-поля,
+  выведены в List+Read (get_index/get_single=true в контракте 0002).
   request_items   Create: product_id, qty
                   Read:   id request_id product_id qty
                   (get_index только у id → отдельной List-схемы не заводим)
@@ -92,6 +97,10 @@ class RequestList(BaseModel):
     issued_at: dt.datetime | None
     writeoff_id: int | None
     created_at: dt.datetime
+    # ── Фича 13 (спека §3/§4): пачка печати/подписи + передача ──
+    batch_id: int | None
+    submitted_at: dt.date | None
+    submitted_register_no: str | None
 
 
 class RequestRead(BaseModel):
@@ -113,6 +122,10 @@ class RequestRead(BaseModel):
     writeoff_id: int | None
     pdf_url: str | None
     created_at: dt.datetime
+    # ── Фича 13 (спека §3/§4): пачка печати/подписи + передача ──
+    batch_id: int | None
+    submitted_at: dt.date | None
+    submitted_register_no: str | None
     items: list[RequestItemRead] = []
 
 
@@ -184,31 +197,59 @@ class WriteoffRead(BaseModel):
 
 
 class RequestCount(BaseModel):
-    """Бейдж-счётчик очереди «К печати» (AP-3)."""
+    """Бейдж-счётчик фильтр-карточки экрана «Выдачи товара» (спека13 §5)."""
 
     count: int
 
 
-class BatchPrintRequest(BaseModel):
-    """POST /requests/batch-print: пакетная печать очереди (§6.3)."""
+class IdListRequest(BaseModel):
+    """Тело bulk-действий (спека13 §3/§4): список id, работа с исключениями.
+
+    Клиент присылает id, которые ДЕЙСТВИТЕЛЬНО обрабатываются (напр. подписанные);
+    исключённые (снятая галочка) просто не попадают в список — сервер их не трогает.
+    """
 
     ids: list[int] = Field(min_length=1, description="Идентификаторы заявок")
 
 
-class BatchPrintResult(BaseModel):
-    printed: list[int] = []
-    skipped: list[int] = []
-
-
 class IssueResult(BaseModel):
-    """Ответ POST /requests/{id}/issue: заявка + рождённая проводка."""
+    """Ответ POST /requests/{id}/issue: заявка + рождённая проводка (спека13 §2)."""
 
     request: RequestRead
     writeoff: WriteoffRead
 
 
+class BatchPrintResult(BaseModel):
+    """Ответ POST /requests/batch-print (спека13 §3): создана пачка, один PDF по
+    сотрудникам. Статус заявок НЕ меняется — печать лишь группирует и печатает."""
+
+    batch_id: int
+    batch_number: str
+    printed: list[int] = []  # заявки, попавшие в пачку (были issued)
+    skipped: list[int] = []  # не issued — в пачку не взяты
+    rendered_pdf: bool = False  # False → WeasyPrint без нативных зависимостей
+
+
+class MarkSignedResult(BaseModel):
+    """Ответ POST /requests/mark-signed (спека13 §3): issued → signed, исключения
+    остаются issued."""
+
+    signed: list[int] = []
+    skipped: list[int] = []
+
+
+class SubmitResult(BaseModel):
+    """Ответ POST /requests/submit-to-accounting (спека13 §4): signed → submitted,
+    общий submitted_register_no на весь вызов."""
+
+    register_no: str | None = None
+    submitted: list[int] = []
+    skipped: list[int] = []
+
+
 class RegistryRow(BaseModel):
-    """Строка реестра выданных документов (§6.4, ADR-2a): ОБА номера.
+    """Строка реестра ПЕРЕДАЧИ в бухгалтерию (спека13 §4, ADR-2a): ОБА номера +
+    номер реестра передачи. Доказательство передачи — бухгалтерия расписывается.
 
     Поиск работает по любому из номеров — бухгалтерия держит на руках бумагу с
     номером ЗАЯВКИ (проводки на момент печати ещё не существовало), а в учёте
@@ -226,3 +267,6 @@ class RegistryRow(BaseModel):
     warehouse_id: int
     issued_at: dt.datetime | None
     writeoff_date: dt.date
+    # Фича 13 (спека §4): реквизиты передачи в бухгалтерию.
+    submitted_at: dt.date | None = None
+    submitted_register_no: str | None = None

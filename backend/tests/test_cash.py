@@ -295,6 +295,99 @@ async def test_list_my_expenses_is_row_level_scoped(session, expense_category, w
     assert all(e.employee_id == c.TEACHER_ID for e in mine)
 
 
+async def _make_expense(amount: str, expense_category: int) -> int:
+    """Проведённый расход учителя → возвращает id (ещё не переданный)."""
+    async with SessionLocal() as s:
+        await CashService(s).create_income(
+            author_id=c.ADMIN_ID,
+            payload=MoneyIncomeCreate(
+                cash_desk_id=c.CASH_DESK_TEACHER, amount=Decimal("1000000"), date=TODAY
+            ),
+        )
+    async with SessionLocal() as s:
+        user = await _get_user(s, c.TEACHER_ID)
+        exp = await CashService(s).create_expense(
+            user=user,
+            payload=MoneyExpenseSubmission(
+                expense_category_id=expense_category,
+                amount=Decimal(amount),
+                description="расход к передаче",
+                date=TODAY,
+            ),
+            receipt_bytes=PNG,
+        )
+        return exp.id
+
+
+async def test_expense_submit_to_accounting_and_filter(session, expense_category):
+    """Спека13 §4: расход → submit-to-accounting → submitted_at + register_no;
+    фильтр submitted=false его больше не показывает, submitted=true показывает.
+    У денег НЕТ этапа подписи — расход готов к передаче сразу после проведения."""
+    eid = await _make_expense("300000", expense_category)
+
+    # До передачи: в «Не передано», не в «Передано».
+    async with SessionLocal() as s:
+        not_sub, n_total = await CashService(s).list_expenses(
+            PageParams(page=1, size=50), submitted=False
+        )
+        sub, s_total = await CashService(s).list_expenses(
+            PageParams(page=1, size=50), submitted=True
+        )
+    assert eid in [e.id for e in not_sub] and n_total == 1
+    assert s_total == 0
+
+    # Передача пачкой.
+    async with SessionLocal() as s:
+        register_no, submitted, skipped = await CashService(s).submit_to_accounting(
+            ids=[eid]
+        )
+    assert submitted == [eid] and skipped == []
+    assert register_no and register_no.startswith("MREG-")
+
+    row = await session.execute(
+        text("SELECT submitted_at, submitted_register_no FROM money_expense WHERE id=:i"),
+        {"i": eid},
+    )
+    submitted_at, reg = row.first()
+    assert submitted_at == TODAY
+    assert reg == register_no
+
+    # После передачи: фильтр submitted=false НЕ показывает, submitted=true показывает.
+    async with SessionLocal() as s:
+        not_sub2, n2 = await CashService(s).list_expenses(
+            PageParams(page=1, size=50), submitted=False
+        )
+        sub2, s2 = await CashService(s).list_expenses(
+            PageParams(page=1, size=50), submitted=True
+        )
+        reg_rows, reg_total = await CashService(s).registry(
+            PageParams(page=1, size=50), register_no=register_no
+        )
+    assert eid not in [e.id for e in not_sub2] and n2 == 0
+    assert eid in [e.id for e in sub2] and s2 == 1
+    assert reg_total == 1 and reg_rows[0].id == eid
+
+
+async def test_expense_double_submit_is_idempotent(session, expense_category):
+    """Повторная передача уже переданного расхода → skipped, номер реестра не
+    перезаписан (условие submitted_at IS NULL в UPDATE)."""
+    eid = await _make_expense("100000", expense_category)
+    async with SessionLocal() as s:
+        first_reg, submitted, _ = await CashService(s).submit_to_accounting(ids=[eid])
+    assert submitted == [eid]
+
+    async with SessionLocal() as s:
+        second_reg, submitted2, skipped2 = await CashService(s).submit_to_accounting(
+            ids=[eid]
+        )
+    assert submitted2 == [] and skipped2 == [eid]
+
+    row = await session.execute(
+        text("SELECT submitted_register_no FROM money_expense WHERE id=:i"), {"i": eid}
+    )
+    assert row.scalar_one() == first_reg  # номер НЕ перезаписан повторной передачей
+
+
 async def test_cash_desks_balance_check_enforced_at_db_level(session):
     """INV-8 последний рубеж: CHECK (balance >= 0) на cash_desks не
     зависит от сервисного слоя — прямой UPDATE в минус тоже отклоняется."""

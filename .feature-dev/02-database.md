@@ -8,7 +8,7 @@
 | Файл | Назначение |
 |---|---|
 | **`build_dictionary.py`** | **Источник правды словаря. Любая правка атрибутов делается здесь и только здесь** |
-| `02-data-dictionary.xlsx` | Человекочитаемый словарь данных, 131 строка-атрибут, 22 таблицы — **генерируемый артефакт** |
+| `02-data-dictionary.xlsx` | Человекочитаемый словарь данных, 145 строк-атрибутов, 23 таблицы (после ревизии 0002 — фича 13, см. §12) — **генерируемый артефакт** |
 | `02-contract.json` | **Единственный источник правды** для всех последующих агентов — **генерируемый артефакт** |
 | `02-database.md` | Этот документ: обоснования, DDL, модели, миграции, план индексов |
 
@@ -1529,6 +1529,92 @@ Django-подход **не потребовался**: ни одно решен�
 Триггер отвергнут: для полноты потребовались бы **два** триггера (на `writeoffs` и на `expense_types`), иначе `UPDATE expense_types` тихо оставил бы невалидные проводки. Побочный эффект выбранного решения — блокировка смены флага у типа с историей — вынесен в ОВ-9 (§7.2) и, на мой взгляд, является правильным поведением учётной системы.
 
 **Почему для SV-9 механизм противоположный.** Заказчик правкой от 17.07.2026 закрыл ОВ-5 и **прямо запретил** составной FK для `warehouses.allows_issuance` — именно потому, что FK навсегда запретил бы снять галочку со склада с историей заявок. Противоречия с §7.2 здесь нет: INV-4 — вечный инвариант (проводка обязана быть согласована со своим типом всегда), SV-9 — правило момента подачи (старые заявки остаются валидными). ТЗ и классифицирует их по разным разделам §5: INV-4 — уровень БД, SV-9 — уровень сервиса. Разная семантика → разный механизм: FK+CHECK против триггера. Сравнительная таблица — §7.3.
+
+---
+
+## 12. Ревизия 0002 — пакетная подпись и учёт передачи (фича 13)
+
+**Вход:** `13-batch-signature-spec.md` (§2 статусы, §3 `signature_batches`, §4 поля передачи, §6 ограничения). Согласовано с заказчиком 19.07.2026, меняет модель §6.2/ADR-3.
+
+`0001` уже накатана на живую БД и **не правится** — все изменения вынесены в новую ревизию Alembic **`0002_batch_signature`** (`down_revision = 0001_initial`). Ревизия применяется поверх существующих данных и обратима (с документированным ограничением, см. ниже).
+
+### 12.1 Что изменилось
+
+| Область | Было (0001) | Стало (0002) |
+|---|---|---|
+| `requests.status` (enum `request_status`) | `draft, to_print, printed, issued` | `draft, to_issue, issued, signed, submitted` |
+| Точка списания (writeoff) | переход `printed → issued` | переход `to_issue → issued` |
+| INV-2 (проводка) | `CHECK ((status = 'issued') = (writeoff_id IS NOT NULL))` | `CHECK ((status IN ('issued','signed','submitted')) = (writeoff_id IS NOT NULL))` |
+| Пачка печати/подписи | — | новая таблица **`signature_batches`** (23-я таблица) + `requests.batch_id` (FK RESTRICT, индекс) |
+| Передача в бухгалтерию (товар) | — | `requests.submitted_at` (date), `requests.submitted_register_no` (varchar) |
+| Передача в бухгалтерию (деньги) | — | `money_expense.submitted_at` (date), `money_expense.submitted_register_no` (varchar) + частичный индекс `WHERE submitted_at IS NULL` |
+| Очередь заявок | частичный индекс `ix_requests_to_print WHERE status='to_print'` (одна очередь) | индекс снят; четыре фильтр-карточки экрана (§5 спеки: К выдаче/К подписи/Подписано/Передано) обслуживает существующий `ix_requests_status` |
+
+### 12.2 ER-дополнение (0002)
+
+```mermaid
+erDiagram
+    users ||--o{ signature_batches : "created_by (RESTRICT)"
+    signature_batches ||--o{ requests : "batch_id (RESTRICT, nullable)"
+
+    signature_batches {
+        bigint id PK
+        varchar_32 number UK "серверная серия"
+        date period_from
+        date period_to "CHECK period_from <= period_to"
+        bigint created_by FK "users.id RESTRICT"
+        timestamptz printed_at "NULL"
+        timestamptz signed_at "NULL"
+        varchar_500 pdf_url "NULL, MinIO"
+        timestamptz created_at
+    }
+    requests {
+        bigint batch_id FK "signature_batches.id RESTRICT, NULL — признак «напечатано»"
+        date submitted_at "NULL"
+        varchar_32 submitted_register_no "NULL"
+        enum status "draft|to_issue|issued|signed|submitted"
+    }
+    money_expense {
+        date submitted_at "NULL — «Не передано»"
+        varchar_32 submitted_register_no "NULL"
+    }
+```
+
+`signature_batches` — только для товара (у денег нет этапа подписи, чек заменяет §7.3). Печать пачкой группирует выданные заявки и генерирует один PDF по сотрудникам; статус заявки печать не меняет (признак «напечатано» = `batch_id IS NOT NULL`). Отметка «Пачка подписана» переводит `issued → signed`.
+
+### 12.3 Как решён `ALTER TYPE` enum на живых данных
+
+PostgreSQL **не удаляет** значения из enum, а `ALTER TYPE … ADD VALUE` нельзя использовать в той же транзакции, где значение затем читается. Нужно и добавить (`to_issue/signed/submitted`), и убрать (`to_print/printed`) — поэтому тип **пересоздаётся**, транзакционно-безопасно, с ремапом данных в одном `ALTER COLUMN … USING`:
+
+```sql
+-- снять зависящее от старых значений ДО смены типа
+DROP INDEX IF EXISTS ix_requests_to_print;                         -- предикат WHERE status='to_print'
+ALTER TABLE requests DROP CONSTRAINT ck_requests_issued_iff_posted; -- INV-2 переписывается
+ALTER TABLE requests ALTER COLUMN status DROP DEFAULT;             -- default 'draft'
+
+ALTER TYPE request_status RENAME TO request_status_old;
+CREATE TYPE request_status AS ENUM ('draft','to_issue','issued','signed','submitted');
+ALTER TABLE requests ALTER COLUMN status TYPE request_status
+  USING (CASE status::text
+           WHEN 'to_print' THEN 'to_issue'   -- data migration §2
+           WHEN 'printed'  THEN 'to_issue'
+           ELSE status::text END)::request_status;
+ALTER TABLE requests ALTER COLUMN status SET DEFAULT 'draft';
+DROP TYPE request_status_old;
+
+ALTER TABLE requests ADD CONSTRAINT ck_requests_issued_iff_posted
+  CHECK ((status IN ('issued','signed','submitted')) = (writeoff_id IS NOT NULL));
+```
+
+**Совместимость INV-2 со старыми данными:** прежние `issued` уже имеют `writeoff_id` (гарантия старого INV-2) → новый CHECK для них истинен; `to_print/printed → to_issue` имеют `writeoff_id IS NULL` → тоже проходят. `ix_requests_status` (обычный b-tree) при смене типа Postgres перестраивает автоматически.
+
+### 12.4 Обратимость и её ограничение
+
+`downgrade` восстанавливает структуру полностью (тип `draft,to_print,printed,issued`, старый INV-2, `ix_requests_to_print`, снятие `signature_batches` и всех новых колонок). **Ограничение — семантическое, не структурное:** обратный ремап `to_issue → to_print`, а `signed/submitted → issued` (в старой модели этих состояний не было). Структура восстанавливается, часть исторической информации о подписи/передаче теряется. Проверено на живой БД: `downgrade -1` → `upgrade head` проходят без ошибок; на момент миграции таблица `requests` пуста (0 строк), фактической потери данных нет.
+
+### 12.5 Границы этапа 1
+
+Ревизия 0002 — **только схема**: модели SQLAlchemy, миграция, контракт/словарь. Статусная машина, `issue()`/`ledger` под новый переход, bulk-действия печати/подписи/передачи, Pydantic-схемы и API-эндпоинты для новых полей — **этап 2** (другой агент). Поэтому у всех новых атрибутов (`signature_batches.*`, `requests.batch_id/submitted_at/submitted_register_no`, `money_expense.submitted_at/submitted_register_no`) API-флаги в контракте пока `get_index=get_single=create=update=—`: read-экспозиция и схемы включаются этапом 2 (иначе гейт по схемам был бы красным до появления схем). `create/update = —` для этих полей — постоянное решение: они server-managed (bulk-действия), клиент их не присылает.
 
 ---
 

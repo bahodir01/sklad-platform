@@ -652,16 +652,16 @@ A("requests", "reason", doc=D, label="Обоснование", new_type="text",
   fe_table_view=N, fe_input_type="textarea", fe_required="True",
   fe_validations="required; непустая строка",
   api_get_index=N, api_get_single=Y, api_create=Y, api_update=N)
-A("requests", "status", doc=D + " · AP-2/AP-3 · INV-2", label="Статус заявки", new_type="enum",
-  description="draft | to_print | printed | issued. Статусы принадлежат ЗАЯВКЕ, не проводке (ADR-2).",
+A("requests", "status", doc=D + " · спека13 §2 · INV-2", label="Статус заявки", new_type="enum",
+  description="draft | to_issue | issued | signed | submitted. Статусы принадлежат ЗАЯВКЕ, не проводке (ADR-2). Фича 13 §2: подпись расцеплена с выдачей.",
   be_type="SAEnum(RequestStatus, name='request_status')", be_choice_model="RequestStatus(str, Enum)",
-  be_choice_enum="draft | to_print | printed | issued", be_nullable="False",
+  be_choice_enum="draft | to_issue | issued | signed | submitted", be_nullable="False",
   be_default="draft (server_default='draft')",
-  be_db_index="True (partial: WHERE status = 'to_print' — AP-2/AP-3)", be_editable="False",
-  be_other="INV-2: CHECK ((status = 'issued') = (writeoff_id IS NOT NULL))", be_filter="status",
+  be_db_index="True (ix_requests_status — фильтр-карточки К выдаче/К подписи/Подписано/Передано, спека13 §5)", be_editable="False",
+  be_other="INV-2: CHECK ((status IN ('issued','signed','submitted')) = (writeoff_id IS NOT NULL))", be_filter="status",
   fe_table_view=Y, fe_input_type="select", fe_required="False", fe_default="draft",
-  fe_choice_enum="draft | to_print | printed | issued", fe_disabled="True",
-  comments="Переходы только через POST /confirm, /print, /issue. SV-5: issue() делает условный UPDATE ... WHERE status='printed'.",
+  fe_choice_enum="draft | to_issue | issued | signed | submitted", fe_disabled="True",
+  comments="Фича 13 §2: draft→to_issue→issued→signed→submitted. Списание (writeoff) рождается на to_issue→issued (было printed→issued). Прежний частичный ix_requests_to_print снят миграцией 0002 вместе со значением to_print; четыре фильтр-карточки экрана обслуживает один ix_requests_status. Data migration 0002: to_print→to_issue, printed→to_issue. Переходы двигает сервер (статусная машина этапа 2).",
   api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
 A("requests", "printed_at", doc=D + " · ОВ-3", label="Напечатано", new_type="timestamptz NULL",
   description="Момент проставления статуса «Напечатан» (вручную завскладом, ОВ-3).",
@@ -702,6 +702,79 @@ A("requests", "created_at", doc=D + " · AP-4", label="Создана", new_type
   be_filter="created_at__range",
   fe_table_view=Y, fe_input_type="date", fe_required="False", fe_disabled="True",
   api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
+# ── Фича 13 (спека §3/§4): пачка печати/подписи + передача в бухгалтерию ──
+A("requests", "batch_id", doc="спека13 §3", label="Пачка подписи", new_type="bigint FK NULL",
+  description="Пачка печати/подписи (signature_batches). NULL до печати пачкой. Признак «напечатано» = batch_id IS NOT NULL. Печать статус НЕ меняет.",
+  be_type="BigInteger · ForeignKey('signature_batches.id', ondelete='RESTRICT')",
+  be_choice_model="relationship SignatureBatch", be_nullable="True", be_db_index="True (FK)",
+  be_on_delete="RESTRICT", be_editable="False", be_filter="batch_id",
+  fe_table_view=N, fe_input_type="number", fe_required="False", fe_disabled="True",
+  comments="Ставит сервер при пакетной печати (ЭТАП 2). RESTRICT: пачку с заявками не удалить, не отвязав заявки. Read-поле выведено (get_index/get_single): экран «К подписи» показывает признак «напечатано» = batch_id IS NOT NULL.",
+  api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
+A("requests", "submitted_at", doc="спека13 §4", label="Передано (дата)", new_type="date NULL",
+  description="Дата передачи заявки в бухгалтерию (bulk-действие signed → submitted). NULL до передачи.",
+  be_type="Date", be_nullable="True", be_editable="False", be_filter="submitted_at__range",
+  fe_table_view=N, fe_input_type="date", fe_required="False", fe_disabled="True",
+  comments="Ставит сервер (bulk «Передать в бухгалтерию», ЭТАП 2). «Передано» на экране = status='submitted'; отдельного индекса на submitted_at у requests нет — фильтр-карточки обслуживает ix_requests_status. Read-поле выведено (get_index/get_single) для карточки «Передано» и реестра передачи.",
+  api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
+A("requests", "submitted_register_no", doc="спека13 §4", label="Реестр передачи №", new_type="varchar(32) NULL",
+  description="Номер реестра передачи (один на пачку передачи). NULL до передачи. Доказательство передачи, бухгалтерия расписывается в получении (спека §4).",
+  be_type="String(32)", be_nullable="True", be_editable="False", be_filter="submitted_register_no",
+  fe_table_view=N, fe_input_type="text", fe_required="False", fe_max="32", fe_disabled="True",
+  comments="Серверная серия, как у прочих документов (спека §7). Индекса нет: реестр печатается по требованию, не горячий путь (правило проекта — индекс под заявленный access pattern). Read-поле выведено (get_index/get_single) для реестра передачи.",
+  api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
+
+# ── Фича 13 (спека §3): пачка печати/подписи (только товар) ──
+D = "спека13 §3 signature_batches"
+pk("signature_batches", D)
+A("signature_batches", "number", doc=D + " · §7", label="Номер пачки", new_type="varchar(32)",
+  description="Автономер пачки, серверная серия, как у прочих документов (спека §7).",
+  be_type="String(32)", be_unique="True", be_nullable="False", be_db_index="True (UNIQUE)",
+  be_editable="False", be_filter="number",
+  fe_table_view=N, fe_input_type="text", fe_required="False", fe_max="32", fe_disabled="True",
+  comments="Генерируется сервером (ЭТАП 2). API-флаги и Pydantic-схемы всей таблицы — ЭТАП 2.",
+  api_get_index=N, api_get_single=N, api_create=N, api_update=N)
+A("signature_batches", "period_from", doc=D, label="Период с", new_type="date",
+  description="Начало периода, за который собрана пачка выдач.",
+  be_type="Date", be_nullable="False",
+  be_other="CHECK (period_from <= period_to) — ck_signature_batches_period_order",
+  fe_table_view=N, fe_input_type="date", fe_required="False", fe_disabled="True",
+  api_get_index=N, api_get_single=N, api_create=N, api_update=N)
+A("signature_batches", "period_to", doc=D, label="Период по", new_type="date",
+  description="Конец периода пачки.",
+  be_type="Date", be_nullable="False",
+  be_other="CHECK (period_from <= period_to) — ck_signature_batches_period_order",
+  fe_table_view=N, fe_input_type="date", fe_required="False", fe_disabled="True",
+  api_get_index=N, api_get_single=N, api_create=N, api_update=N)
+A("signature_batches", "created_by", doc=D, label="Автор пачки", new_type="bigint FK",
+  description="Кто создал пачку (админ). Из JWT.",
+  be_type="BigInteger · ForeignKey('users.id', ondelete='RESTRICT')",
+  be_choice_model="relationship User", be_nullable="False", be_db_index="True (FK)",
+  be_on_delete="RESTRICT", be_editable="False", be_filter="created_by",
+  fe_table_view=N, fe_input_type="select", fe_required="False", fe_disabled="True",
+  api_get_index=N, api_get_single=N, api_create=N, api_update=N)
+A("signature_batches", "printed_at", doc=D, label="Напечатано", new_type="timestamptz NULL",
+  description="Момент печати пачки (генерация PDF по сотрудникам). NULL до печати.",
+  be_type="DateTime(timezone=True)", be_nullable="True", be_editable="False", be_filter="printed_at__range",
+  fe_table_view=N, fe_input_type="date", fe_required="False", fe_disabled="True",
+  api_get_index=N, api_get_single=N, api_create=N, api_update=N)
+A("signature_batches", "signed_at", doc=D, label="Подписано", new_type="timestamptz NULL",
+  description="Момент отметки «Пачка подписана» (все заявки пачки issued → signed). NULL до подписи.",
+  be_type="DateTime(timezone=True)", be_nullable="True", be_editable="False", be_filter="signed_at__range",
+  fe_table_view=N, fe_input_type="date", fe_required="False", fe_disabled="True",
+  api_get_index=N, api_get_single=N, api_create=N, api_update=N)
+A("signature_batches", "pdf_url", doc=D, label="PDF пачки", new_type="varchar(500) NULL",
+  description="Ключ объекта в MinIO — один PDF, сгруппированный по сотрудникам. NULL до печати.",
+  be_type="String(500)", be_nullable="True", be_editable="False",
+  fe_table_view=N, fe_input_type="text", fe_required="False", fe_max="500", fe_disabled="True",
+  comments="Ставит сервер при рендере. Хранится ключ объекта, не публичная ссылка (бакет приватный).",
+  api_get_index=N, api_get_single=N, api_create=N, api_update=N)
+A("signature_batches", "created_at", doc=D, label="Создана", new_type="timestamptz",
+  description="Момент создания пачки.",
+  be_type="DateTime(timezone=True)", be_auto="server_default=func.now()",
+  be_nullable="False", be_default="now()", be_editable="False", be_filter="created_at__range",
+  fe_table_view=N, fe_input_type="date", fe_required="False", fe_disabled="True",
+  api_get_index=N, api_get_single=N, api_create=N, api_update=N)
 
 D = "ТЗ §3 М4 request_items"
 pk("request_items", D)
@@ -931,6 +1004,21 @@ A("money_expense", "date", doc=D + " · AP-8", label="Дата", new_type="date"
   be_db_index="True (в составе composite-индексов AP-8)", be_filter="date__range",
   fe_table_view=Y, fe_input_type="date", fe_required="True",
   api_get_index=Y, api_get_single=Y, api_create=Y, api_update=N)
+# ── Фича 13 (спека §4): передача расхода денег в бухгалтерию ──
+A("money_expense", "submitted_at", doc="спека13 §4", label="Передано (дата)", new_type="date NULL",
+  description="Дата передачи расхода в бухгалтерию (bulk-действие). У денег НЕТ этапа подписи — чек заменяет §7.3, расход готов к передаче сразу после проведения. NULL = «Не передано».",
+  be_type="Date", be_nullable="True", be_editable="False",
+  be_other="Частичный индекс ix_money_expense_not_submitted (id) WHERE submitted_at IS NULL — фильтр «Не передано»/actionable-набор. На самой колонке btree нет (индексируется id по предикату), как в прежнем ix_requests_to_print.",
+  be_filter="submitted_at__range",
+  fe_table_view=N, fe_input_type="date", fe_required="False", fe_disabled="True",
+  comments="Ставит сервер (bulk «Передать в бухгалтерию», ЭТАП 2). У денег нет статуса, поэтому «Передано / Не передано» различается только по этому полю; под фильтр «Не передано» заведён частичный индекс ix_money_expense_not_submitted. Read-поле выведено (get_index/get_single) для фильтра «Передано/Не передано» и реестра передачи.",
+  api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
+A("money_expense", "submitted_register_no", doc="спека13 §4", label="Реестр передачи №", new_type="varchar(32) NULL",
+  description="Номер реестра передачи (один на пачку передачи денег). NULL до передачи.",
+  be_type="String(32)", be_nullable="True", be_editable="False", be_filter="submitted_register_no",
+  fe_table_view=N, fe_input_type="text", fe_required="False", fe_max="32", fe_disabled="True",
+  comments="Серверная серия. Отдельный реестр для товара и денег (спека §4). Индекса нет: печать реестра по требованию, не горячий путь. Read-поле выведено (get_index/get_single) для реестра передачи денег.",
+  api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
 
 # ══════════════════════════════════════════════════════════════════════════
 # М7. АДМИНИСТРИРОВАНИЕ / АУДИТ

@@ -1,14 +1,17 @@
-"""Роутер М4 (архитектура §6). Статусная машина заявки + очередь печати.
+"""Роутер М4 (архитектура §6). Статусная машина заявки + пакетная подпись.
 
-Доступ:
+Спека13 §2-§5. Доступ:
   teacher/worker: POST /requests, POST /requests/{id}/confirm, GET /requests/my
-  admin:          GET /requests?status=to_print, GET /requests/count,
-                  POST /{id}/print, POST /{id}/issue, GET /{id}/pdf,
-                  POST /requests/batch-print, GET /requests/registry
+  admin:          GET /requests?status=to_issue|issued|signed|submitted,
+                  GET /requests/count?status=..., POST /{id}/issue,
+                  POST /requests/batch-print, GET /requests/batches/{id}/pdf,
+                  POST /requests/mark-signed, POST /requests/submit-to-accounting,
+                  GET /requests/registry, GET /{id}/pdf
 
 ВАЖНО о порядке маршрутов: статические пути (/requests/my, /requests/count,
-/requests/registry, /requests/batch-print) объявлены ДО динамического
-/requests/{id}/..., иначе FastAPI попытался бы разобрать "my"/"count" как {id}.
+/requests/registry, /requests/batch-print, /requests/mark-signed,
+/requests/submit-to-accounting, /requests/batches/{id}/pdf) объявлены ДО
+динамического /requests/{id}/..., иначе FastAPI разобрал бы "my"/"count" как {id}.
 """
 
 from typing import Annotated
@@ -22,18 +25,19 @@ from app.core.security import require_admin, require_role
 from app.modules.auth.models import User
 from app.modules.auth.tokens import get_redis
 from app.modules.issuance.schemas import (
-    BatchPrintRequest,
     BatchPrintResult,
+    IdListRequest,
     IssueResult,
+    MarkSignedResult,
     RegistryRow,
     RequestCount,
     RequestCreate,
     RequestList,
     RequestRead,
+    SubmitResult,
     WriteoffCreate,
     WriteoffRead,
 )
-from app.modules.issuance.models import Request
 from app.modules.issuance.service import IssuanceService
 from app.shared.enums import RequestStatus, UserRole
 from app.shared.pagination import Page, PageParamsDep
@@ -41,6 +45,7 @@ from app.shared.pagination import Page, PageParamsDep
 router = APIRouter(tags=["issuance"])
 
 EntityId = Annotated[int, Path(ge=1, description="Идентификатор заявки")]
+BatchId = Annotated[int, Path(ge=1, description="Идентификатор пачки подписи")]
 
 # Заявку подаёт/подтверждает сотрудник (teacher|worker); admin делами склада не
 # подменяет сотрудника — заявка это его документ (§1.3).
@@ -64,7 +69,6 @@ async def create_request(
     user: User = Depends(require_employee),
     session: AsyncSession = Depends(get_session),
 ) -> RequestRead:
-    # employee_id — сервер из current_user (api.create=false; SV-9 по складу).
     req = await IssuanceService(session).create_request(
         employee_id=user.id, payload=payload
     )
@@ -74,7 +78,7 @@ async def create_request(
 @router.post(
     "/requests/{id}/confirm",
     response_model=RequestRead,
-    summary="Подтвердить заявку (draft→to_print; только владелец)",
+    summary="Подтвердить заявку (draft→to_issue; только владелец)",
 )
 async def confirm_request(
     id: EntityId,
@@ -101,36 +105,41 @@ async def my_requests(
     return Page.build([RequestList.model_validate(i) for i in items], total, params)
 
 
-# ══════════════════════ Завсклад (admin) ════════════════════════════
+# ══════════════════════ Экран «Выдачи товара» (admin) ═══════════════
 
 
 @router.get(
     "/requests/count",
     response_model=RequestCount,
-    summary="Счётчик очереди «К печати» (бейдж, AP-3)",
+    summary="Счётчик фильтр-карточки (спека13 §5: К выдаче/К подписи/Подписано/Передано)",
 )
 async def requests_count(
-    status_filter: Annotated[RequestStatus, Query(alias="status")] = RequestStatus.to_print,
+    status_filter: Annotated[RequestStatus, Query(alias="status")] = RequestStatus.to_issue,
     _: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> RequestCount:
-    # Бейдж считает только очередь печати; иные статусы бейджем не отслеживаются.
-    if status_filter != RequestStatus.to_print:
-        return RequestCount(count=0)
-    return RequestCount(count=await IssuanceService(session).count_to_print())
+    count = await IssuanceService(session).count_by_status(status=status_filter)
+    return RequestCount(count=count)
 
 
 @router.get(
     "/requests/registry",
     response_model=Page[RegistryRow],
-    summary="Реестр выданных: ОБА номера — заявки и проводки (§6.4, ADR-2a)",
+    summary="Реестр передачи в бухгалтерию: ОБА номера + № реестра (спека13 §4)",
 )
 async def requests_registry(
     params: PageParamsDep,
+    register_no: Annotated[str | None, Query(description="Номер реестра передачи")] = None,
+    date: Annotated[str | None, Query(description="Дата передачи YYYY-MM-DD")] = None,
     _: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> Page[RegistryRow]:
-    rows, total = await IssuanceService(session).registry(params)
+    import datetime as _dt
+
+    parsed_date = _dt.date.fromisoformat(date) if date else None
+    rows, total = await IssuanceService(session).registry(
+        params, register_no=register_no, date=parsed_date
+    )
     items = [
         RegistryRow(
             request_id=r.id,
@@ -143,6 +152,8 @@ async def requests_registry(
             warehouse_id=r.warehouse_id,
             issued_at=r.issued_at,
             writeoff_date=w.date,
+            submitted_at=r.submitted_at,
+            submitted_register_no=r.submitted_register_no,
         )
         for r, w in rows
     ]
@@ -152,57 +163,99 @@ async def requests_registry(
 @router.post(
     "/requests/batch-print",
     response_model=BatchPrintResult,
-    summary="Пакетная печать очереди (§6.3)",
+    summary="Печать пачкой: создать пачку + один PDF по сотрудникам (спека13 §3)",
 )
 async def batch_print(
-    payload: BatchPrintRequest,
-    _: User = Depends(require_admin),
+    payload: IdListRequest,
+    user: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> BatchPrintResult:
-    printed, skipped = await IssuanceService(session).batch_print(ids=payload.ids)
-    return BatchPrintResult(printed=printed, skipped=skipped)
+    batch, printed, skipped, rendered = await IssuanceService(session).batch_print(
+        ids=payload.ids, created_by=user.id
+    )
+    return BatchPrintResult(
+        batch_id=batch.id,
+        batch_number=batch.number,
+        printed=printed,
+        skipped=skipped,
+        rendered_pdf=rendered,
+    )
+
+
+@router.post(
+    "/requests/mark-signed",
+    response_model=MarkSignedResult,
+    summary="Отметить подписано пачкой (issued→signed, исключения; спека13 §3)",
+)
+async def mark_signed(
+    payload: IdListRequest,
+    _: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> MarkSignedResult:
+    signed, skipped = await IssuanceService(session).mark_signed(ids=payload.ids)
+    return MarkSignedResult(signed=signed, skipped=skipped)
+
+
+@router.post(
+    "/requests/submit-to-accounting",
+    response_model=SubmitResult,
+    summary="Передать в бухгалтерию пачкой (signed→submitted, № реестра; спека13 §4)",
+)
+async def submit_to_accounting(
+    payload: IdListRequest,
+    _: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> SubmitResult:
+    register_no, submitted, skipped = await IssuanceService(
+        session
+    ).submit_to_accounting(ids=payload.ids)
+    return SubmitResult(register_no=register_no, submitted=submitted, skipped=skipped)
+
+
+@router.get(
+    "/requests/batches/{id}/pdf",
+    summary="PDF пачки подписи (один документ по сотрудникам, спека13 §3)",
+)
+async def batch_pdf(
+    id: BatchId,
+    _: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    batch, pdf, html = await IssuanceService(session).build_batch_pdf(batch_id=id)
+    if pdf is not None:
+        return Response(
+            content=pdf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{batch.number}.pdf"'},
+        )
+    return Response(
+        content=html,
+        media_type="text/html; charset=utf-8",
+        headers={"X-PDF-Renderer": "unavailable-html-fallback"},
+    )
 
 
 @router.get(
     "/requests",
     response_model=Page[RequestList],
-    summary="Очередь «К печати» (admin, AP-2)",
+    summary="Заявки по статусу (спека13 §5, admin)",
 )
 async def list_requests(
     params: PageParamsDep,
-    status_filter: Annotated[RequestStatus, Query(alias="status")] = RequestStatus.to_print,
+    status_filter: Annotated[RequestStatus, Query(alias="status")] = RequestStatus.to_issue,
     _: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> Page[RequestList]:
-    # Очередь — status='to_print' (AP-2). Иные статусы админ смотрит через реестр.
-    svc = IssuanceService(session)
-    if status_filter == RequestStatus.to_print:
-        items, total = await svc.list_to_print(params)
-    else:
-        items, total = await svc._repo.list_requests(  # noqa: SLF001
-            params, filters=[Request.status == status_filter]
-        )
+    items, total = await IssuanceService(session).list_by_status(
+        params, status=status_filter
+    )
     return Page.build([RequestList.model_validate(i) for i in items], total, params)
-
-
-@router.post(
-    "/requests/{id}/print",
-    response_model=RequestRead,
-    summary="Отметить напечатанной (to_print→printed, admin, ОВ-3)",
-)
-async def print_request(
-    id: EntityId,
-    _: User = Depends(require_admin),
-    session: AsyncSession = Depends(get_session),
-) -> RequestRead:
-    req, _pdf = await IssuanceService(session).print_request(request_id=id)
-    return RequestRead.model_validate(req)
 
 
 @router.post(
     "/requests/{id}/issue",
     response_model=IssueResult,
-    summary="Выдать товар: проводка + списание (printed→issued, admin)",
+    summary="Выдать товар: проводка + СПИСАНИЕ (to_issue→issued, admin; спека13 §2)",
 )
 async def issue_request(
     id: EntityId,
@@ -210,19 +263,19 @@ async def issue_request(
     user: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> IssueResult:
-    """POST /requests/{id}/issue — необратимая выдача (§5.3).
+    """POST /requests/{id}/issue — необратимая выдача со списанием (спека13 §1-§2).
 
-    Идемпотентность (архитектура §6): при наличии Idempotency-Key ретрай сети /
-    двойной клик по «Выдано» отсекается через Redis ДО входа в транзакцию. Если
-    Redis недоступен — гарантию единственного списания даёт условие
-    `WHERE status='printed'` внутри UPDATE (SV-5): второй issue() получит
-    rowcount=0 и Conflict. Redis лишь экономит поход в БД на явном ретрае.
+    Идемпотентность: при наличии Idempotency-Key ретрай сети / двойной клик по
+    «Выдать» отсекается через Redis ДО входа в транзакцию. Если Redis недоступен —
+    гарантию единственного списания даёт условие `WHERE status='to_issue'` внутри
+    UPDATE (SV-5): второй issue() получит rowcount=0 и Conflict.
     """
     redis_guard_key = f"idem:issue:{id}:{idempotency_key}" if idempotency_key else None
     if redis_guard_key is not None:
         try:
-            # SET NX: первый запрос занимает ключ, повторный — отбивается.
-            acquired = await get_redis().set(redis_guard_key, "1", nx=True, ex=_IDEMPOTENCY_TTL_SECONDS)
+            acquired = await get_redis().set(
+                redis_guard_key, "1", nx=True, ex=_IDEMPOTENCY_TTL_SECONDS
+            )
             if not acquired:
                 raise ConflictError(
                     "Повторная выдача по тому же Idempotency-Key отклонена",
@@ -266,12 +319,6 @@ async def create_writeoff(
     user: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> WriteoffRead:
-    """POST /writeoffs — только порча/брак (requires_employee=false). Выдача
-    (requires_employee=true) отклоняется: она создаётся через issue() (этап 3).
-
-    author_id — сервер из current_user; number/requires_employee — сервер.
-    Списывает немедленно через ledger.post(−qty), без статусов и печати.
-    """
     writeoff = await IssuanceService(session).create_writeoff(
         author_id=user.id, payload=payload
     )
@@ -280,7 +327,7 @@ async def create_writeoff(
 
 @router.get(
     "/requests/{id}/pdf",
-    summary="PDF бланка расхода (номер ЗАЯВКИ, ADR-2a; перепечатка безопасна)",
+    summary="PDF бланка расхода одной заявки (номер ЗАЯВКИ, ADR-2a; перепечать копии)",
 )
 async def request_pdf(
     id: EntityId,
@@ -294,7 +341,6 @@ async def request_pdf(
             media_type="application/pdf",
             headers={"Content-Disposition": f'inline; filename="{req.number}.pdf"'},
         )
-    # WeasyPrint недоступен: отдаём готовый к печати HTML, честно помечая заголовком.
     return Response(
         content=html,
         media_type="text/html; charset=utf-8",

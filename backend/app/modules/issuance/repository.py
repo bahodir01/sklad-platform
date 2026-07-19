@@ -1,8 +1,8 @@
 """Доступ к данным М4 (архитектура §2 — без бизнес-правил).
 
-Запросы очереди «К печати» (AP-2/AP-3), «Моих заявок» (AP-4, row-level в
-сервисе), реестра выданных документов (AP-11: проводка → заявка → бумага) и
-справочные данные для issue()/бланка.
+Запросы фильтр-карточек экрана «Выдачи товара» (спека13 §5: К выдаче/К подписи/
+Подписано/Передано), «Моих заявок» (AP-4, row-level в сервисе), реестра ПЕРЕДАЧИ
+в бухгалтерию (спека13 §4) и справочные данные для issue()/бланка/пачки.
 """
 
 from collections import namedtuple
@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.modules.auth.models import User
 from app.modules.catalog.models import ExpenseType, Product, Unit
-from app.modules.issuance.models import Request, Writeoff
+from app.modules.issuance.models import Request, SignatureBatch, Writeoff
 from app.shared.enums import CatalogStatus, RequestStatus
 from app.shared.pagination import PageParams
 
@@ -70,14 +70,13 @@ class IssuanceRepository:
     async def list_requests(
         self, params: PageParams, *, filters: list[Any] | None = None
     ) -> tuple[list[Request], int]:
-        """Список заявок (очередь «К печати», «Мои») — offset-пагинация.
+        """Список заявок (фильтр-карточки, «Мои») — offset-пагинация.
 
         Сортировка (created_at DESC, id DESC) ложится на композитный индекс
-        (employee_id, created_at DESC) для «Моих заявок» (AP-4).
+        (employee_id, created_at DESC) для «Моих заявок» (AP-4). Фильтр по
+        status обслуживает ix_requests_status (спека13 §5).
         """
-        # JOIN на users: список очереди/«Мои» показывает ФИО+категорию (§6.3),
-        # а не только employee_id. users PK-join дешёвый, частичный индекс
-        # очереди (AP-2) продолжает работать по WHERE status='to_print'.
+        # JOIN на users: список показывает ФИО+категорию (§6.3), а не employee_id.
         stmt: Select = (
             select(Request, User.full_name, User.category)
             .join(User, Request.employee_id == User.id)
@@ -99,25 +98,30 @@ class IssuanceRepository:
         return result, int(total or 0)
 
     async def count_requests(self, *, filters: list[Any] | None = None) -> int:
-        """AP-3: бейдж-счётчик. WHERE status='to_print' покрыт частичным
-        индексом ix_requests_to_print — запрос крошечный."""
+        """Счётчик фильтр-карточки (спека13 §5). WHERE status=? покрыт
+        ix_requests_status — запрос крошечный."""
         stmt = select(func.count()).select_from(Request)
         if filters:
             stmt = stmt.where(*filters)
         return int(await self._session.scalar(stmt) or 0)
 
-    # ── реестр выданных (§6.4, AP-11) ───────────────────────────────
+    # ── реестр ПЕРЕДАЧИ в бухгалтерию (спека13 §4) ──────────────────
 
     async def registry(
         self, params: PageParams, *, filters: list[Any] | None = None
     ) -> tuple[list[tuple[Request, Writeoff]], int]:
-        """Выданные заявки + их проводки. ОБА номера (ADR-2a) + ФИО/категория
-        сотрудника рядом с номерами (§6.4) — JOIN на users."""
+        """Переданные заявки + их проводки. ОБА номера (ADR-2a) + ФИО/категория
+        сотрудника + реквизиты передачи (спека13 §4) — JOIN на users/writeoffs.
+
+        Реестр — доказательство передачи (бухгалтерия расписывается): показываем
+        заявки status='submitted'. Опциональные фильтры (register_no, дата) —
+        через filters от сервиса.
+        """
         base: Select = (
             select(Request, Writeoff, User.full_name, User.category)
             .join(Writeoff, Request.writeoff_id == Writeoff.id)
             .join(User, Request.employee_id == User.id)
-            .where(Request.status == RequestStatus.issued)
+            .where(Request.status == RequestStatus.submitted)
         )
         if filters:
             base = base.where(*filters)
@@ -125,7 +129,7 @@ class IssuanceRepository:
             select(func.count()).select_from(base.subquery())
         )
         rows = await self._session.execute(
-            base.order_by(Request.issued_at.desc(), Request.id.desc())
+            base.order_by(Request.submitted_at.desc(), Request.id.desc())
             .offset(params.offset)
             .limit(params.limit)
         )
@@ -134,12 +138,49 @@ class IssuanceRepository:
             int(total or 0),
         )
 
+    # ── пачка печати/подписи (спека13 §3) ───────────────────────────
+
+    async def lock_issued_requests(self, ids: list[int]) -> list[Request]:
+        """Заявки из списка в статусе 'issued', заблокированные FOR UPDATE.
+
+        Пакетная печать/подпись трогают статус — блокировка сериализует их с
+        конкурентным issue()/mark-signed по тем же строкам (спека13 §6). Не-issued
+        id просто не попадают в выборку (в сервисе уходят в skipped)."""
+        if not ids:
+            return []
+        rows = await self._session.scalars(
+            select(Request)
+            .where(Request.id.in_(ids), Request.status == RequestStatus.issued)
+            .order_by(Request.id)
+            .with_for_update()
+        )
+        return list(rows)
+
+    async def get_batch(self, batch_id: int) -> SignatureBatch | None:
+        return await self._session.get(SignatureBatch, batch_id)
+
+    async def batch_requests_detail(
+        self, batch_id: int
+    ) -> list[tuple[Request, str, Any]]:
+        """Заявки пачки со строками + ФИО/категория, СГРУППИРОВАННЫЕ по сотруднику.
+
+        Для одного PDF по сотрудникам (спека13 §3): сортировка по employee_id
+        собирает разделы одного человека рядом."""
+        rows = await self._session.execute(
+            select(Request, User.full_name, User.category)
+            .join(User, Request.employee_id == User.id)
+            .where(Request.batch_id == batch_id)
+            .options(selectinload(Request.items))
+            .order_by(User.full_name, Request.id)
+        )
+        return [(r, fn, cat) for r, fn, cat in rows.all()]
+
     # ── справочные данные для issue()/бланка ────────────────────────
 
     async def issuance_expense_type(self) -> ExpenseType | None:
         """Тип расхода «Выдача»: активный тип с requires_employee=true.
 
-        issue() создаёт проводку именно этого типа (§5.3). Порча/брак имеют
+        issue() создаёт проводку именно этого типа (спека13 §2). Порча/брак имеют
         requires_employee=false и через заявку никогда не проходят.
         """
         return await self._session.scalar(

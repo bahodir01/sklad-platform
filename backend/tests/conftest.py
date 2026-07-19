@@ -84,6 +84,10 @@ _TRANSACTIONAL_TABLES = (
     "writeoffs",
     "request_items",
     "requests",
+    # Фича 13: пачки печати/подписи. Требуют TRUNCATE вместе с requests
+    # (requests.batch_id → signature_batches, ondelete RESTRICT) — CASCADE ниже
+    # снимает порядок, но обе таблицы обязаны быть в одном операторе.
+    "signature_batches",
     "transfer_items",
     "transfers",
     "acquisition_items",

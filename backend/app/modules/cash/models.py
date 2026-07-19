@@ -89,6 +89,15 @@ class MoneyExpense(Base):
         Index("ix_money_expense_category_date", "expense_category_id", text("date DESC")),
         Index("ix_money_expense_cash_desk_date", "cash_desk_id", text("date DESC")),
         Index("ix_money_expense_employee_date", "employee_id", text("date DESC")),
+        # Фича 13 (спека §4): у денег нет статуса — «Передано / Не передано»
+        # различается только по submitted_at. Actionable-набор (экран передачи,
+        # bulk-действие) — это IS NULL; частичный индекс держит его горячим и
+        # ограниченным, тот же приём, что прежний ix_requests_to_print.
+        Index(
+            "ix_money_expense_not_submitted",
+            "id",
+            postgresql_where=text("submitted_at IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -107,3 +116,9 @@ class MoneyExpense(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     receipt_url: Mapped[str] = mapped_column(String(500), nullable=False)  # INV-7
     date: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    # ── Фича 13 (спека §4): передача в бухгалтерию ──
+    # У денег НЕТ этапа подписи (чек заменяет §7.3): расход готов к передаче
+    # сразу после проведения. bulk-действие «передать» ставит submitted_at и
+    # общий submitted_register_no. Ставит сервер, клиент не присылает.
+    submitted_at: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    submitted_register_no: Mapped[str | None] = mapped_column(String(32), nullable=True)

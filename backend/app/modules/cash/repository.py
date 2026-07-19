@@ -43,3 +43,23 @@ class CashRepository:
             .limit(params.limit)
         )
         return list(rows), int(total or 0)
+
+    async def registry(
+        self, params: PageParams, *, filters: list[Any] | None = None
+    ) -> tuple[list[MoneyExpense], int]:
+        """Реестр передачи денег (спека13 §4): только переданные расходы
+        (submitted_at IS NOT NULL), опционально по register_no / дате."""
+        stmt: Select[tuple[MoneyExpense]] = select(MoneyExpense).where(
+            MoneyExpense.submitted_at.is_not(None)
+        )
+        if filters:
+            stmt = stmt.where(*filters)
+        total = await self._session.scalar(
+            select(func.count()).select_from(stmt.subquery())
+        )
+        rows = await self._session.scalars(
+            stmt.order_by(MoneyExpense.submitted_at.desc(), MoneyExpense.id.desc())
+            .offset(params.offset)
+            .limit(params.limit)
+        )
+        return list(rows), int(total or 0)

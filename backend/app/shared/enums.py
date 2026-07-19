@@ -41,12 +41,20 @@ class NotificationStatus(str, Enum):
 
 
 class RequestStatus(str, Enum):
-    """Статусы принадлежат ЗАЯВКЕ, а не проводке (ADR-2)."""
+    """Статусы принадлежат ЗАЯВКЕ, а не проводке (ADR-2).
+
+    Фича 13 (пакетная подпись, спека §2) расцепила выдачу и подпись:
+        draft → to_issue → issued → signed → submitted
+    Списание со склада — на переходе to_issue → issued (было printed → issued).
+    Старые значения to_print/printed убраны; их данные мигрируют в to_issue
+    (миграция 0002, data migration).
+    """
 
     draft = "draft"
-    to_print = "to_print"
-    printed = "printed"
+    to_issue = "to_issue"
     issued = "issued"
+    signed = "signed"
+    submitted = "submitted"
 
 
 class MovementDocType(str, Enum):

@@ -1,21 +1,25 @@
-"""Бизнес-правила М4: статусная машина заявки и выдача. Транзакция открывается
-здесь (архитектура §2).
+"""Бизнес-правила М4: статусная машина заявки, выдача и пакетная подпись.
+Транзакция открывается здесь (архитектура §2).
 
-Статусная машина (§5.3, ADR-2):
+Статусная машина (спека13 §2, ADR-2) — фича 13 расцепила выдачу и подпись:
 
-    draft ──confirm()──► to_print ──print()──► printed ──issue()──► issued
-      │                     │                     │                    │
-   сотрудник           очередь завсклада      PDF + подпись        writeoff +
-   заполняет           (бейдж AP-3)           на бумаге            ledger.post(−)
+    draft ─confirm()─► to_issue ─issue()─► issued ─mark_signed()─► signed ─submit()─► submitted
+      │                   │                   │                        │                   │
+   сотрудник        очередь «К выдаче»    товар выдан,           подписи собраны       передано
+   заполняет                             СПИСАН со склада        пачкой                в бухгалтерию
+                                         (ledger.post −qty)
 
-Переходы только вперёд и только нужной ролью; откат вне scope (ТЗ §11).
+Ключевое изменение фичи 13 (спека §1): списание товара — на переходе
+to_issue → issued (в момент физической выдачи учителю), НЕ на печати. Печать и
+подпись собираются ПОЗЖE пачкой (signature_batches) и статус выдачи не двигают.
 
-issue() — САМОЕ ОПАСНОЕ место системы (§5.3). Порядок операций строго по
-02-database.md §7.1 / архитектуре §5.3, и переставлять его НЕЛЬЗЯ:
-INV-2 (`status='issued'` ⟺ `writeoff_id IS NOT NULL`) — немедленный CHECK (в
-PostgreSQL не может быть DEFERRABLE), поэтому статус и writeoff_id обязаны
-меняться ОДНИМ оператором UPDATE. Защита от двойного списания — в условии
-`WHERE status='printed'` этого же UPDATE (SV-5), не в проверке перед ним.
+issue() — САМОЕ ОПАСНОЕ место системы. Порядок операций строго по
+02-database.md §7.1 и переставлять его НЕЛЬЗЯ: INV-2 (спека §2:
+`status IN ('issued','signed','submitted')` ⟺ `writeoff_id IS NOT NULL`) —
+немедленный CHECK (в PostgreSQL не может быть DEFERRABLE), поэтому статус и
+writeoff_id обязаны меняться ОДНИМ оператором UPDATE. Защита от двойного
+списания — в условии `WHERE status='to_issue'` этого же UPDATE (SV-5), не в
+проверке перед ним.
 """
 
 import datetime as dt
@@ -35,7 +39,13 @@ from app.core.exceptions import (
 )
 from app.modules.auth.models import User
 from app.modules.catalog.models import ExpenseType, Warehouse
-from app.modules.issuance.models import Request, RequestItem, Writeoff, WriteoffItem
+from app.modules.issuance.models import (
+    Request,
+    RequestItem,
+    SignatureBatch,
+    Writeoff,
+    WriteoffItem,
+)
 from app.modules.issuance.repository import IssuanceRepository
 from app.modules.issuance.schemas import RequestCreate, WriteoffCreate
 from app.modules.stock import ledger
@@ -45,6 +55,8 @@ from app.shared.pagination import PageParams
 
 _REQUEST_PREFIX = "REQ-"
 _WRITEOFF_PREFIX = "WOFF-"
+_BATCH_PREFIX = "BATCH-"
+_REGISTER_PREFIX = "REG-"  # реестр передачи товара (спека13 §4)
 
 
 class IssuanceService:
@@ -98,8 +110,9 @@ class IssuanceService:
         return await self._repo.get_request_with_items(req.id)
 
     async def confirm_request(self, *, request_id: int, employee_id: int) -> Request:
-        """POST /requests/{id}/confirm (draft→to_print), только владелец-сотрудник.
+        """POST /requests/{id}/confirm (draft→to_issue), только владелец-сотрудник.
 
+        Спека13 §2: подтверждение ставит заявку в очередь «К выдаче» завсклада.
         Row-level (§1.3): подтвердить может лишь автор заявки. Переход — условным
         UPDATE, чтобы повторный клик/гонка не двигали статус дважды.
         """
@@ -117,7 +130,7 @@ class IssuanceService:
                 Request.status == RequestStatus.draft,
                 Request.employee_id == employee_id,
             )
-            .values(status=RequestStatus.to_print)
+            .values(status=RequestStatus.to_issue)
             .execution_options(synchronize_session=False)
         )
         if result.rowcount == 0:
@@ -128,17 +141,17 @@ class IssuanceService:
         await self._commit()
         return await self._reload(request_id)
 
-    # ══════════════════ Очередь «К печати» (admin) ══════════════════
+    # ══════════════════ Фильтр-карточки экрана (admin, спека13 §5) ═══
 
-    async def list_to_print(self, params: PageParams) -> tuple[list[Request], int]:
+    async def list_by_status(
+        self, params: PageParams, *, status: RequestStatus
+    ) -> tuple[list[Request], int]:
         return await self._repo.list_requests(
-            params, filters=[Request.status == RequestStatus.to_print]
+            params, filters=[Request.status == status]
         )
 
-    async def count_to_print(self) -> int:
-        return await self._repo.count_requests(
-            filters=[Request.status == RequestStatus.to_print]
-        )
+    async def count_by_status(self, *, status: RequestStatus) -> int:
+        return await self._repo.count_requests(filters=[Request.status == status])
 
     async def list_my(
         self, params: PageParams, *, employee_id: int
@@ -152,83 +165,30 @@ class IssuanceService:
             params, filters=[Request.employee_id == employee_id]
         )
 
-    async def print_request(self, *, request_id: int) -> tuple[Request, bytes | None]:
-        """POST /requests/{id}/print (to_print→printed), admin.
-
-        ОВ-3: статус «Напечатан» ставит завскладом ЯВНО — открытие PDF ≠ факт
-        печати. Перепечатка безопасна: из printed снова в printed, printed_at не
-        затирается. Возвращает (заявка, pdf_bytes|None) — байты для ответа с
-        файлом, роутер решает про MinIO/фолбэк.
-        """
-        req = await self._repo.get_request_with_items(request_id)
-        if req is None:
-            raise NotFoundError("Заявка", request_id)
-        if req.status not in (RequestStatus.to_print, RequestStatus.printed):
-            raise ConflictError(
-                "Печать доступна только для заявок в очереди «К печати»",
-                code="invalid_transition",
-            )
-
-        pdf_bytes, pdf_url = await self._render_and_store(req)
-
-        result = await self._session.execute(
-            update(Request)
-            .where(
-                Request.id == request_id,
-                Request.status.in_([RequestStatus.to_print, RequestStatus.printed]),
-            )
-            .values(
-                status=RequestStatus.printed,
-                # printed_at — только при первой печати; перепечатка не затирает.
-                printed_at=func.coalesce(Request.printed_at, func.now()),
-                pdf_url=pdf_url,
-            )
-            .execution_options(synchronize_session=False)
-        )
-        if result.rowcount == 0:  # pragma: no cover — статус проверен выше
-            raise ConflictError("Заявка недоступна для печати", code="invalid_transition")
-        await self._commit()
-        return await self._reload(request_id), pdf_bytes
-
-    async def batch_print(self, *, ids: list[int]) -> tuple[list[int], list[int]]:
-        """POST /requests/batch-print — печать очереди пачкой (§6.3).
-
-        Не в наличии/не в статусе — попадают в skipped, а не рушат всю пачку.
-        Каждая заявка печатается своей транзакцией (одна плохая не откатит
-        остальные).
-        """
-        printed: list[int] = []
-        skipped: list[int] = []
-        for rid in ids:
-            try:
-                await self.print_request(request_id=rid)
-                printed.append(rid)
-            except DomainError:
-                skipped.append(rid)
-        return printed, skipped
-
-    # ══════════════════ Выдача — issue() (§5.3, ADR-3) ══════════════
+    # ══════════════════ Выдача — issue() (спека13 §2) ═══════════════
 
     async def issue_request(
         self, *, request_id: int, author_id: int
     ) -> tuple[Request, Writeoff]:
-        """POST /requests/{id}/issue (printed→issued), admin. НЕОБРАТИМО.
+        """POST /requests/{id}/issue (to_issue→issued), admin. НЕОБРАТИМО.
 
-        Порядок операций КРИТИЧЕН — см. модульный docstring и §5.3:
+        Спека13 §1-§2: СПИСАНИЕ ТОВАРА ЗДЕСЬ — в момент физической выдачи учителю.
+        Порядок операций КРИТИЧЕН — см. модульный docstring:
           1. INSERT writeoffs (проводка рождается ПЕРВОЙ) + writeoff_items;
           2. ledger.post(−qty) по каждой строке (может упасть InsufficientStock);
           3. UPDATE requests SET status='issued', issued_at, writeoff_id ОДНИМ
-             оператором WHERE id=? AND status='printed' (INV-2 + SV-5);
+             оператором WHERE id=? AND status='to_issue' (INV-2 + SV-5);
           4. rowcount=0 → Conflict → ROLLBACK (проводка и списание откатятся).
         """
         req = await self._repo.get_request_with_items(request_id)
         if req is None:
             raise NotFoundError("Заявка", request_id)
-        # Предварительная проверка статуса — только ради внятной ошибки на явно
-        # невыданной заявке; НАСТОЯЩАЯ защита от гонки — в WHERE ниже (SV-5).
-        if req.status != RequestStatus.printed:
+        # Предварительная проверка статуса — только ради внятной ошибки; НАСТОЯЩАЯ
+        # защита от гонки — в WHERE ниже (SV-5).
+        if req.status != RequestStatus.to_issue:
             raise ConflictError(
-                "Выдать можно только напечатанную заявку", code="invalid_transition"
+                "Выдать можно только заявку из очереди «К выдаче»",
+                code="invalid_transition",
             )
 
         expense_type = await self._repo.issuance_expense_type()
@@ -284,12 +244,12 @@ class IssuanceService:
                 ) from exc
 
         # ── 3. Статус + связка ОДНИМ оператором (INV-2 немедленный CHECK) ──
-        # Условие status='printed' ВНУТРИ UPDATE (SV-5): два параллельных
+        # Условие status='to_issue' ВНУТРИ UPDATE (SV-5): два параллельных
         # issue() → второй получит rowcount=0. issued_at, status, writeoff_id
         # меняются вместе — «выдано без проводки» не существует ни на миг.
         result = await self._session.execute(
             update(Request)
-            .where(Request.id == request_id, Request.status == RequestStatus.printed)
+            .where(Request.id == request_id, Request.status == RequestStatus.to_issue)
             .values(
                 status=RequestStatus.issued,
                 issued_at=func.now(),
@@ -302,7 +262,7 @@ class IssuanceService:
             # транзакцию — осиротевшая проводка и её списание уходят вместе с ней.
             await self._session.rollback()
             raise ConflictError(
-                "Заявка уже выдана или не находится в статусе «Напечатана»",
+                "Заявка уже выдана или не находится в статусе «К выдаче»",
                 code="already_issued",
             )
 
@@ -313,6 +273,142 @@ class IssuanceService:
         )
         return req, writeoff
 
+    # ══════════════════ Пачка печати (admin, спека13 §3) ════════════
+
+    async def batch_print(
+        self, *, ids: list[int], created_by: int
+    ) -> tuple[SignatureBatch, list[int], list[int], bool]:
+        """POST /requests/batch-print — печать пачкой (спека13 §3).
+
+        Из списка берутся заявки в статусе 'issued' (не-issued → skipped, не рушат
+        пачку). Создаётся signature_batches (серверный номер), выбранным ставится
+        batch_id + printed_at (признак «напечатано» = batch_id IS NOT NULL). СТАТУС
+        НЕ МЕНЯЕТСЯ. Генерируется ОДИН PDF, сгруппированный по сотрудникам.
+
+        Возвращает (пачка, printed[], skipped[], rendered_pdf).
+        """
+        # FOR UPDATE по выбранным issued-заявкам — сериализация с issue()/подписью.
+        locked = await self._repo.lock_issued_requests(ids)
+        printed_ids = [r.id for r in locked]
+        skipped_ids = [i for i in ids if i not in set(printed_ids)]
+        if not printed_ids:
+            raise ConflictError(
+                "В пачку не попала ни одна заявка: нужны заявки в статусе «К подписи»",
+                code="empty_batch",
+            )
+
+        # Период пачки = диапазон дат выдачи вошедших заявок (CHECK from <= to).
+        issued_dates = [r.issued_at.date() for r in locked if r.issued_at is not None]
+        period_from = min(issued_dates) if issued_dates else dt.date.today()
+        period_to = max(issued_dates) if issued_dates else dt.date.today()
+
+        number = await next_document_number(
+            self._session, SignatureBatch.number, prefix=_BATCH_PREFIX
+        )
+        batch = SignatureBatch(
+            number=number,
+            period_from=period_from,
+            period_to=period_to,
+            created_by=created_by,
+            printed_at=func.now(),
+        )
+        self._session.add(batch)
+        await self._session.flush()  # batch.id
+
+        # Признак «напечатано»: batch_id + printed_at на выбранных. Статус НЕ трогаем.
+        await self._session.execute(
+            update(Request)
+            .where(Request.id.in_(printed_ids), Request.status == RequestStatus.issued)
+            .values(batch_id=batch.id, printed_at=func.coalesce(Request.printed_at, func.now()))
+            .execution_options(synchronize_session=False)
+        )
+
+        # Один PDF по сотрудникам → в MinIO, ключ в batch.pdf_url.
+        pdf_bytes, pdf_url = await self._render_and_store_batch(batch.id, number)
+        batch.pdf_url = pdf_url
+
+        await self._commit()
+        await self._session.refresh(batch)
+        return batch, printed_ids, skipped_ids, pdf_bytes is not None
+
+    async def mark_signed(self, *, ids: list[int]) -> tuple[list[int], list[int]]:
+        """POST /requests/mark-signed — issued → signed пачкой (спека13 §3).
+
+        Клиент присылает id, которые ДЕЙСТВИТЕЛЬНО подписаны; исключённые (снятая
+        галочка) в список не попадают и остаются issued (вернутся в следующую
+        пачку). Условие status='issued' в UPDATE защищает от гонок/повторов.
+        Пачкам подписанных заявок ставится signed_at.
+        """
+        if not ids:
+            return [], []
+        # FOR UPDATE + условный UPDATE issued → signed.
+        locked = await self._repo.lock_issued_requests(ids)
+        signed_ids = [r.id for r in locked]
+        skipped_ids = [i for i in ids if i not in set(signed_ids)]
+        if not signed_ids:
+            return [], skipped_ids
+
+        batch_ids = {r.batch_id for r in locked if r.batch_id is not None}
+
+        await self._session.execute(
+            update(Request)
+            .where(Request.id.in_(signed_ids), Request.status == RequestStatus.issued)
+            .values(status=RequestStatus.signed)
+            .execution_options(synchronize_session=False)
+        )
+        # Отметка «Пачка подписана»: signed_at на затронутых пачках.
+        if batch_ids:
+            await self._session.execute(
+                update(SignatureBatch)
+                .where(
+                    SignatureBatch.id.in_(batch_ids),
+                    SignatureBatch.signed_at.is_(None),
+                )
+                .values(signed_at=func.now())
+                .execution_options(synchronize_session=False)
+            )
+        await self._commit()
+        return signed_ids, skipped_ids
+
+    async def submit_to_accounting(
+        self, *, ids: list[int]
+    ) -> tuple[str | None, list[int], list[int]]:
+        """POST /requests/submit-to-accounting — signed → submitted (спека13 §4).
+
+        Общий submitted_register_no на весь вызов (один номер реестра передачи),
+        submitted_at = сегодня. Исключённые (не в списке / не signed) не трогаются.
+        Условие status='signed' в UPDATE защищает от повторной передачи.
+        """
+        if not ids:
+            return None, [], []
+        # FOR UPDATE по signed-заявкам из списка.
+        locked = await self._session.scalars(
+            select(Request)
+            .where(Request.id.in_(ids), Request.status == RequestStatus.signed)
+            .order_by(Request.id)
+            .with_for_update()
+        )
+        submit_ids = [r.id for r in locked]
+        skipped_ids = [i for i in ids if i not in set(submit_ids)]
+        if not submit_ids:
+            return None, [], skipped_ids
+
+        register_no = await next_document_number(
+            self._session, Request.submitted_register_no, prefix=_REGISTER_PREFIX
+        )
+        await self._session.execute(
+            update(Request)
+            .where(Request.id.in_(submit_ids), Request.status == RequestStatus.signed)
+            .values(
+                status=RequestStatus.submitted,
+                submitted_at=dt.date.today(),
+                submitted_register_no=register_no,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await self._commit()
+        return register_no, submit_ids, skipped_ids
+
     # ══════════════════ Порча / брак — прямое списание (ЭТАП 4) ═════
 
     async def create_writeoff(
@@ -320,7 +416,7 @@ class IssuanceService:
     ) -> Writeoff:
         """POST /writeoffs (admin) — прямое списание порча/брак БЕЗ заявки (§4.4).
 
-        В отличие от выдачи (issue(), этап 3) здесь нет статусов, печати и подписи:
+        В отличие от выдачи (issue()) здесь нет статусов, печати и подписи:
         проводка создаётся СРАЗУ и списывает немедленно через ledger.post(−qty).
         Порча и брак могут случиться на ЛЮБОМ складе — ограничение allows_issuance
         (SV-9) на них НЕ распространяется (ТЗ §3 М1), склад не проверяем на этот флаг.
@@ -328,7 +424,7 @@ class IssuanceService:
         Инварианты, закрытые здесь и продублированные в БД:
           * тип расхода — только requires_employee=false (Порча/Брак). Тип
             «Выдача» (requires_employee=true) отклоняется: выдача идёт лишь через
-            заявку (этап 3);
+            заявку;
           * INV-4: при requires_employee=false сотрудник запрещён (employee_id=NULL).
             Составной FK + CHECK ck_writeoffs_employee_iff_required — последний рубеж.
         """
@@ -341,11 +437,11 @@ class IssuanceService:
                 code="expense_type_archived",
             )
 
-        # Тип «Выдача» через этот эндпоинт запрещён — только через заявку (этап 3).
+        # Тип «Выдача» через этот эндпоинт запрещён — только через заявку.
         if expense_type.requires_employee:
             raise ValidationError(
-                "Тип расхода «Выдача» проводится только через заявку сотрудника "
-                "(этап 3), а не прямым списанием",
+                "Тип расхода «Выдача» проводится только через заявку сотрудника, "
+                "а не прямым списанием",
                 code="issuance_via_request",
             )
 
@@ -364,8 +460,6 @@ class IssuanceService:
             date=payload.date,
             warehouse_id=payload.warehouse_id,
             expense_type_id=expense_type.id,
-            # Копия флага (Д-2): requires_employee=false ⇒ employee_id обязан быть
-            # NULL, что и требует INV-4. Клиент это поле не присылает (api.create=false).
             requires_employee=expense_type.requires_employee,
             employee_id=None,
             author_id=author_id,
@@ -407,12 +501,22 @@ class IssuanceService:
             .execution_options(populate_existing=True)
         )
 
-    # ══════════════════ Реестр выданных (§6.4) ══════════════════════
+    # ══════════════════ Реестр передачи (спека13 §4) ════════════════
 
     async def registry(
-        self, params: PageParams
+        self,
+        params: PageParams,
+        *,
+        register_no: str | None = None,
+        date: dt.date | None = None,
     ) -> tuple[list[tuple[Request, Writeoff]], int]:
-        return await self._repo.registry(params)
+        """Реестр переданного в бухгалтерию по register_no / дате (спека13 §4)."""
+        filters: list = []
+        if register_no:
+            filters.append(Request.submitted_register_no == register_no)
+        if date:
+            filters.append(Request.submitted_at == date)
+        return await self._repo.registry(params, filters=filters or None)
 
     # ══════════════════ Чтение / PDF ════════════════════════════════
 
@@ -423,10 +527,9 @@ class IssuanceService:
         return req
 
     async def build_pdf(self, *, request_id: int) -> tuple[Request, bytes | None, str]:
-        """Данные и HTML/PDF бланка расхода для GET /{id}/pdf.
+        """Данные и HTML/PDF бланка расхода одной заявки (GET /{id}/pdf).
 
-        Возвращает (заявка, pdf_bytes|None, html). Перепечатка статус не меняет.
-        """
+        Перепечать копии из истории (спека13 §5, экран «Передано»)."""
         req = await self._repo.get_request_with_items(request_id)
         if req is None:
             raise NotFoundError("Заявка", request_id)
@@ -435,7 +538,19 @@ class IssuanceService:
 
         return req, html_to_pdf(html), html
 
-    # ── бланк расхода (заглушка ОВ-1б, поля §6.4) ───────────────────
+    async def build_batch_pdf(
+        self, *, batch_id: int
+    ) -> tuple[SignatureBatch, bytes | None, str]:
+        """GET /requests/batches/{id}/pdf — один PDF пачки по сотрудникам."""
+        batch = await self._repo.get_batch(batch_id)
+        if batch is None:
+            raise NotFoundError("Пачка подписи", batch_id)
+        html = await self._render_batch_html(batch)
+        from app.shared.pdf import html_to_pdf
+
+        return batch, html_to_pdf(html), html
+
+    # ── бланк расхода одной заявки (заглушка ОВ-1б, поля §6.4) ───────
 
     async def _render_html(self, req: Request) -> str:
         from app.shared.pdf import build_org_context, render_template
@@ -462,12 +577,57 @@ class IssuanceService:
             },
         )
 
-    async def _render_and_store(self, req: Request) -> tuple[bytes | None, str]:
-        """Рендер бланка + снимок в MinIO (документы) с локальным фолбэком.
+    # ── ОДИН бланк пачки, сгруппированный по сотрудникам (спека13 §3) ──
 
-        Ключ объекта ``documents/requests/<number>.pdf`` → pdf_url (ADR-2a: на
-        бумаге номер ЗАЯВКИ). Если WeasyPrint недоступен — снимок не кладём, но
-        ключ фиксируем: GET /{id}/pdf отрендерит на лету.
+    async def _render_batch_html(self, batch: SignatureBatch) -> str:
+        from app.shared.pdf import build_org_context, render_template
+
+        detail = await self._repo.batch_requests_detail(batch.id)
+        # Собираем строки-товары для резолва ЕИ одним запросом.
+        all_pids = [
+            it.product_id for req, _fn, _cat in detail for it in req.items
+        ]
+        info = await self._repo.product_info(all_pids)
+
+        # Группировка по сотруднику: раздел листа на человека (спека13 §3).
+        sections: list[dict] = []
+        current: dict | None = None
+        for req, full_name, category in detail:
+            if current is None or current["employee_id"] != req.employee_id:
+                current = {
+                    "employee_id": req.employee_id,
+                    "employee_full_name": full_name,
+                    "employee_category": category.value if category else "—",
+                    "requests": [],
+                }
+                sections.append(current)
+            current["requests"].append(
+                {
+                    "number": req.number,
+                    "reason": req.reason,
+                    "lines": [
+                        {
+                            "product_name": info[it.product_id].name
+                            if it.product_id in info
+                            else "?",
+                            "qty": _fmt(it.qty),
+                            "unit_code": info[it.product_id].unit_code
+                            if it.product_id in info
+                            else "",
+                        }
+                        for it in req.items
+                    ],
+                }
+            )
+        return render_template(
+            "signature_batch.html",
+            {"batch": batch, "sections": sections, "org": build_org_context()},
+        )
+
+    async def _render_and_store(self, req: Request) -> tuple[bytes | None, str]:
+        """Рендер бланка одной заявки + снимок в MinIO с локальным фолбэком.
+
+        Ключ ``requests/<number>.pdf`` (ADR-2a: на бумаге номер ЗАЯВКИ) → pdf_url.
         """
         from app.core.config import settings
         from app.shared.pdf import html_to_pdf
@@ -484,18 +644,40 @@ class IssuanceService:
                 content_type="application/pdf",
             )
         else:
-            # Снимок не сформирован (нет нативных pango/cairo) — фиксируем ключ.
+            pdf_url = f"{settings.s3_bucket_documents}/{key}"
+        return pdf_bytes, pdf_url
+
+    async def _render_and_store_batch(
+        self, batch_id: int, number: str
+    ) -> tuple[bytes | None, str]:
+        """Рендер ОДНОГО бланка пачки по сотрудникам + снимок в MinIO.
+
+        Ключ ``batches/<number>.pdf``. Если WeasyPrint недоступен — снимок не
+        кладём, но ключ фиксируем: GET /batches/{id}/pdf отрендерит на лету.
+        """
+        from app.core.config import settings
+        from app.shared.pdf import html_to_pdf
+        from app.shared.storage import put_object
+
+        batch = await self._repo.get_batch(batch_id)
+        html = await self._render_batch_html(batch)
+        pdf_bytes = html_to_pdf(html)
+        key = f"batches/{number}.pdf"
+        if pdf_bytes is not None:
+            pdf_url = put_object(
+                settings.s3_bucket_documents,
+                key,
+                pdf_bytes,
+                content_type="application/pdf",
+            )
+        else:
             pdf_url = f"{settings.s3_bucket_documents}/{key}"
         return pdf_bytes, pdf_url
 
     # ══════════════════ Общее ═══════════════════════════════════════
 
     async def _reload(self, request_id: int) -> Request:
-        """Свежая заявка со строками после условного UPDATE (populate_existing:
-        синхронизируем in-session объект с БД, а не отдаём устаревший из карты).
-
-        Через репозиторий — он же довешивает ФИО/категорию сотрудника (§6.3).
-        """
+        """Свежая заявка со строками после условного UPDATE (populate_existing)."""
         return await self._repo.get_request_with_items(
             request_id, populate_existing=True
         )
@@ -536,6 +718,10 @@ def _translate_integrity_error(exc: IntegrityError) -> DomainError:
         )
     if "ck_requests_reason_not_blank" in text:
         return ValidationError("Обоснование не может быть пустым", code="reason_blank")
+    if "ck_signature_batches_period_order" in text:
+        return ValidationError(
+            "Период пачки некорректен (начало позже конца)", code="batch_period_order"
+        )
     if "ck_writeoffs_employee_iff_required" in text:
         return ValidationError(
             "Для типа расхода «Выдача» обязателен сотрудник-получатель (INV-4)",

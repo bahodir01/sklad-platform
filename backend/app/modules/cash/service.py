@@ -26,7 +26,7 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,10 +44,12 @@ from app.modules.cash.repository import CashRepository
 from app.modules.cash.schemas import MoneyExpenseSubmission, MoneyIncomeCreate
 from app.modules.catalog.models import ExpenseCategory
 from app.shared.enums import CashDeskType, CatalogStatus
+from app.shared.numbering import next_document_number
 from app.shared.pagination import PageParams
 from app.shared.storage import put_object, sniff_receipt
 
 _ZERO = Decimal("0")
+_REGISTER_PREFIX = "MREG-"  # реестр передачи денег (спека13 §4; отдельно от товара)
 
 
 class CashService:
@@ -187,6 +189,80 @@ class CashService:
         return await self._repo.list_expenses(
             params, filters=[MoneyExpense.employee_id == employee_id]
         )
+
+    # ══════════════════ Передача в бухгалтерию (admin, спека13 §4) ═══
+
+    async def list_expenses(
+        self, params: PageParams, *, submitted: bool | None = None
+    ) -> tuple[list[MoneyExpense], int]:
+        """GET /cash/expenses (admin) — все расходы, фильтр «Передано/Не передано».
+
+        submitted=True → submitted_at IS NOT NULL; False → IS NULL (actionable-набор,
+        частичный индекс ix_money_expense_not_submitted); None → все.
+        """
+        filters: list = []
+        if submitted is True:
+            filters.append(MoneyExpense.submitted_at.is_not(None))
+        elif submitted is False:
+            filters.append(MoneyExpense.submitted_at.is_(None))
+        return await self._repo.list_expenses(params, filters=filters or None)
+
+    async def submit_to_accounting(
+        self, *, ids: list[int]
+    ) -> tuple[str | None, list[int], list[int]]:
+        """POST /cash/expenses/submit-to-accounting — bulk-передача (спека13 §4).
+
+        У денег НЕТ этапа подписи (чек заменяет §7.3): расход готов к передаче
+        сразу после проведения. Общий submitted_register_no на весь вызов;
+        submitted_at = сегодня. Условие submitted_at IS NULL в UPDATE защищает от
+        повторной передачи (исключённые/уже переданные → skipped).
+        """
+        if not ids:
+            return None, [], []
+        # FOR UPDATE по ещё не переданным расходам из списка.
+        locked = await self._session.scalars(
+            select(MoneyExpense)
+            .where(
+                MoneyExpense.id.in_(ids),
+                MoneyExpense.submitted_at.is_(None),
+            )
+            .order_by(MoneyExpense.id)
+            .with_for_update()
+        )
+        submit_ids = [e.id for e in locked]
+        skipped_ids = [i for i in ids if i not in set(submit_ids)]
+        if not submit_ids:
+            return None, [], skipped_ids
+
+        register_no = await next_document_number(
+            self._session, MoneyExpense.submitted_register_no, prefix=_REGISTER_PREFIX
+        )
+        await self._session.execute(
+            update(MoneyExpense)
+            .where(
+                MoneyExpense.id.in_(submit_ids),
+                MoneyExpense.submitted_at.is_(None),
+            )
+            .values(submitted_at=dt.date.today(), submitted_register_no=register_no)
+            .execution_options(synchronize_session=False)
+        )
+        await self._commit()
+        return register_no, submit_ids, skipped_ids
+
+    async def registry(
+        self,
+        params: PageParams,
+        *,
+        register_no: str | None = None,
+        date: dt.date | None = None,
+    ) -> tuple[list[MoneyExpense], int]:
+        """Реестр передачи денег по register_no / дате (спека13 §4)."""
+        filters: list = []
+        if register_no:
+            filters.append(MoneyExpense.submitted_register_no == register_no)
+        if date:
+            filters.append(MoneyExpense.submitted_at == date)
+        return await self._repo.registry(params, filters=filters or None)
 
     # ══════════════════ Общее ═══════════════════════════════════════
 

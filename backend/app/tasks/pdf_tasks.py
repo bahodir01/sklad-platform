@@ -8,7 +8,7 @@
 момент запроса пользователя.
 
 Задачи НЕ дублируют бизнес-логику: рендер+сохранение заявки берётся у
-IssuanceService (тот же код, что и в print_request), уведомление рендерится тем
+IssuanceService (общий рендер _render_and_store), уведомление рендерится тем
 же shared/pdf + templates/pdf/notification.html, что и печать бланка. В БД
 задачи НЕ пишут (pdf_url в строке проставляет сам сервис при печати) —
 прогрев касается только объектного хранилища, поэтому он безопасен и
@@ -66,7 +66,7 @@ async def _generate_writeoff_pdf(request_id: int) -> dict:
         if req is None:
             logger.info("generate_writeoff_pdf: заявка %s не найдена — пропуск", request_id)
             return {"status": "not_found", "request_id": request_id}
-        # Тот же рендер+сохранение, что использует print_request (не дублируем логику).
+        # Тот же рендер+сохранение бланка одной заявки (не дублируем логику).
         pdf_bytes, pdf_url = await svc._render_and_store(req)  # noqa: SLF001
         return {
             "status": "ok",

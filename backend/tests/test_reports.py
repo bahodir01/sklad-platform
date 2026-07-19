@@ -140,8 +140,7 @@ async def test_movements_report_signs_and_keyset_pagination(session):
         rid = req.id
     async with SessionLocal() as s:
         await IssuanceService(s).confirm_request(request_id=rid, employee_id=c.TEACHER_ID)
-    async with SessionLocal() as s:
-        await IssuanceService(s).print_request(request_id=rid)
+    # Фича 13: выдача (списание) идёт прямо из to_issue, печать больше не шлюз.
     async with SessionLocal() as s:
         await IssuanceService(s).issue_request(request_id=rid, author_id=c.ADMIN_ID)
 

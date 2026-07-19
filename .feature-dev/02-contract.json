@@ -4228,25 +4228,25 @@
           "name": "status",
           "label": "Статус заявки",
           "new_type": "enum",
-          "description": "draft | to_print | printed | issued. Статусы принадлежат ЗАЯВКЕ, не проводке (ADR-2).",
+          "description": "draft | to_issue | issued | signed | submitted. Статусы принадлежат ЗАЯВКЕ, не проводке (ADR-2). Фича 13 §2: подпись расцеплена с выдачей.",
           "backend": {
             "type": "SAEnum(RequestStatus, name='request_status')",
             "auto": "",
             "unique": "",
             "choice_model": "RequestStatus(str, Enum)",
-            "choice_enum": "draft | to_print | printed | issued",
+            "choice_enum": "draft | to_issue | issued | signed | submitted",
             "nullable": "False",
             "default": "draft (server_default='draft')",
-            "db_index": "True (partial: WHERE status = 'to_print' — AP-2/AP-3)",
+            "db_index": "True (ix_requests_status — фильтр-карточки К выдаче/К подписи/Подписано/Передано, спека13 §5)",
             "editable": "False",
             "on_delete": "",
-            "other_validations": "INV-2: CHECK ((status = 'issued') = (writeoff_id IS NOT NULL))",
+            "other_validations": "INV-2: CHECK ((status IN ('issued','signed','submitted')) = (writeoff_id IS NOT NULL))",
             "filter": "status"
           },
           "frontend": {
             "unique": "",
             "choice_model": "",
-            "choice_enum": "draft | to_print | printed | issued",
+            "choice_enum": "draft | to_issue | issued | signed | submitted",
             "nullable": "",
             "default": "draft",
             "db_index": "",
@@ -4520,6 +4520,611 @@
           "api": {
             "get_index": true,
             "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "batch_id",
+          "label": "Пачка подписи",
+          "new_type": "bigint FK NULL",
+          "description": "Пачка печати/подписи (signature_batches). NULL до печати пачкой. Признак «напечатано» = batch_id IS NOT NULL. Печать статус НЕ меняет.",
+          "backend": {
+            "type": "BigInteger · ForeignKey('signature_batches.id', ondelete='RESTRICT')",
+            "auto": "",
+            "unique": "",
+            "choice_model": "relationship SignatureBatch",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "True (FK)",
+            "editable": "False",
+            "on_delete": "RESTRICT",
+            "other_validations": "",
+            "filter": "batch_id"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "number",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "submitted_at",
+          "label": "Передано (дата)",
+          "new_type": "date NULL",
+          "description": "Дата передачи заявки в бухгалтерию (bulk-действие signed → submitted). NULL до передачи.",
+          "backend": {
+            "type": "Date",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "submitted_at__range"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "date",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "submitted_register_no",
+          "label": "Реестр передачи №",
+          "new_type": "varchar(32) NULL",
+          "description": "Номер реестра передачи (один на пачку передачи). NULL до передачи. Доказательство передачи, бухгалтерия расписывается в получении (спека §4).",
+          "backend": {
+            "type": "String(32)",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "submitted_register_no"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "text",
+            "required": "False",
+            "max": "32",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "signature_batches",
+      "attributes": [
+        {
+          "name": "id",
+          "label": "ID",
+          "new_type": "bigserial",
+          "description": "Суррогатный первичный ключ.",
+          "backend": {
+            "type": "BigInteger",
+            "auto": "autoincrement (Identity)",
+            "unique": "True",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "False",
+            "default": "",
+            "db_index": "True (PK)",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "PRIMARY KEY",
+            "filter": "id"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "number",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "number",
+          "label": "Номер пачки",
+          "new_type": "varchar(32)",
+          "description": "Автономер пачки, серверная серия, как у прочих документов (спека §7).",
+          "backend": {
+            "type": "String(32)",
+            "auto": "",
+            "unique": "True",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "False",
+            "default": "",
+            "db_index": "True (UNIQUE)",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "number"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "text",
+            "required": "False",
+            "max": "32",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": false,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "period_from",
+          "label": "Период с",
+          "new_type": "date",
+          "description": "Начало периода, за который собрана пачка выдач.",
+          "backend": {
+            "type": "Date",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "False",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "on_delete": "",
+            "other_validations": "CHECK (period_from <= period_to) — ck_signature_batches_period_order",
+            "filter": ""
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "date",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": false,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "period_to",
+          "label": "Период по",
+          "new_type": "date",
+          "description": "Конец периода пачки.",
+          "backend": {
+            "type": "Date",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "False",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "on_delete": "",
+            "other_validations": "CHECK (period_from <= period_to) — ck_signature_batches_period_order",
+            "filter": ""
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "date",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": false,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "created_by",
+          "label": "Автор пачки",
+          "new_type": "bigint FK",
+          "description": "Кто создал пачку (админ). Из JWT.",
+          "backend": {
+            "type": "BigInteger · ForeignKey('users.id', ondelete='RESTRICT')",
+            "auto": "",
+            "unique": "",
+            "choice_model": "relationship User",
+            "choice_enum": "",
+            "nullable": "False",
+            "default": "",
+            "db_index": "True (FK)",
+            "editable": "False",
+            "on_delete": "RESTRICT",
+            "other_validations": "",
+            "filter": "created_by"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "select",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": false,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "printed_at",
+          "label": "Напечатано",
+          "new_type": "timestamptz NULL",
+          "description": "Момент печати пачки (генерация PDF по сотрудникам). NULL до печати.",
+          "backend": {
+            "type": "DateTime(timezone=True)",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "printed_at__range"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "date",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": false,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "signed_at",
+          "label": "Подписано",
+          "new_type": "timestamptz NULL",
+          "description": "Момент отметки «Пачка подписана» (все заявки пачки issued → signed). NULL до подписи.",
+          "backend": {
+            "type": "DateTime(timezone=True)",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "signed_at__range"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "date",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": false,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "pdf_url",
+          "label": "PDF пачки",
+          "new_type": "varchar(500) NULL",
+          "description": "Ключ объекта в MinIO — один PDF, сгруппированный по сотрудникам. NULL до печати.",
+          "backend": {
+            "type": "String(500)",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": ""
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "text",
+            "required": "False",
+            "max": "500",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": false,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "created_at",
+          "label": "Создана",
+          "new_type": "timestamptz",
+          "description": "Момент создания пачки.",
+          "backend": {
+            "type": "DateTime(timezone=True)",
+            "auto": "server_default=func.now()",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "False",
+            "default": "now()",
+            "db_index": "",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "created_at__range"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "date",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": false,
             "create": false,
             "update": false
           }
@@ -6251,6 +6856,106 @@
             "get_index": true,
             "get_single": true,
             "create": true,
+            "update": false
+          }
+        },
+        {
+          "name": "submitted_at",
+          "label": "Передано (дата)",
+          "new_type": "date NULL",
+          "description": "Дата передачи расхода в бухгалтерию (bulk-действие). У денег НЕТ этапа подписи — чек заменяет §7.3, расход готов к передаче сразу после проведения. NULL = «Не передано».",
+          "backend": {
+            "type": "Date",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "Частичный индекс ix_money_expense_not_submitted (id) WHERE submitted_at IS NULL — фильтр «Не передано»/actionable-набор. На самой колонке btree нет (индексируется id по предикату), как в прежнем ix_requests_to_print.",
+            "filter": "submitted_at__range"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "date",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "submitted_register_no",
+          "label": "Реестр передачи №",
+          "new_type": "varchar(32) NULL",
+          "description": "Номер реестра передачи (один на пачку передачи денег). NULL до передачи.",
+          "backend": {
+            "type": "String(32)",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "submitted_register_no"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "text",
+            "required": "False",
+            "max": "32",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
             "update": false
           }
         }

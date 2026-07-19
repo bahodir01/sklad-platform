@@ -12,7 +12,7 @@ import datetime as dt
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
@@ -20,6 +20,9 @@ from app.core.security import require_admin, require_any_role, require_role
 from app.modules.auth.models import User
 from app.modules.cash.schemas import (
     CashDeskRead,
+    ExpenseRegistryRow,
+    ExpenseSubmitRequest,
+    ExpenseSubmitResult,
     MoneyExpenseRead,
     MoneyExpenseSubmission,
     MoneyExpenseList,
@@ -86,6 +89,60 @@ async def my_expenses(
     session: AsyncSession = Depends(get_session),
 ) -> Page[MoneyExpenseList]:
     items, total = await CashService(session).list_my_expenses(params, employee_id=user.id)
+    return Page.build([MoneyExpenseList.model_validate(i) for i in items], total, params)
+
+
+@router.get(
+    "/cash/expenses/registry",
+    response_model=Page[ExpenseRegistryRow],
+    summary="Реестр передачи денег в бухгалтерию (admin, спека13 §4)",
+)
+async def expenses_registry(
+    params: PageParamsDep,
+    register_no: Annotated[str | None, Query(description="Номер реестра передачи")] = None,
+    date: Annotated[str | None, Query(description="Дата передачи YYYY-MM-DD")] = None,
+    _: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> Page[ExpenseRegistryRow]:
+    parsed_date = dt.date.fromisoformat(date) if date else None
+    items, total = await CashService(session).registry(
+        params, register_no=register_no, date=parsed_date
+    )
+    return Page.build(
+        [ExpenseRegistryRow.model_validate(i) for i in items], total, params
+    )
+
+
+@router.post(
+    "/cash/expenses/submit-to-accounting",
+    response_model=ExpenseSubmitResult,
+    summary="Передать расходы в бухгалтерию пачкой (admin, № реестра; спека13 §4)",
+)
+async def submit_expenses_to_accounting(
+    payload: ExpenseSubmitRequest,
+    _: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> ExpenseSubmitResult:
+    register_no, submitted, skipped = await CashService(session).submit_to_accounting(
+        ids=payload.ids
+    )
+    return ExpenseSubmitResult(
+        register_no=register_no, submitted=submitted, skipped=skipped
+    )
+
+
+@router.get(
+    "/cash/expenses",
+    response_model=Page[MoneyExpenseList],
+    summary="Расходы денег, фильтр «Передано/Не передано» (admin, спека13 §4)",
+)
+async def list_expenses(
+    params: PageParamsDep,
+    submitted: Annotated[bool | None, Query(description="true=переданные, false=нет")] = None,
+    _: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> Page[MoneyExpenseList]:
+    items, total = await CashService(session).list_expenses(params, submitted=submitted)
     return Page.build([MoneyExpenseList.model_validate(i) for i in items], total, params)
 
 

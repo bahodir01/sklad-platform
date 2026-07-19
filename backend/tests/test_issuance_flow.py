@@ -1,9 +1,11 @@
-"""М4 «Заявки и печать» — статусная машина и issue() (ADR-2, §5.3).
+"""М4 «Заявки и выдача» — статусная машина и issue() (ADR-2, спека13 §2).
 
-Formalises stage3_scenarios.py (все 5 обязательных сценариев + доп.
-INV-2-немедленный) into permanent regression tests. Covers the two items
-architecture §9 calls mandatory: конкурентное списание последнего товара при
-issue(), и защита от двойного issue().
+Фича 13 расцепила выдачу и подпись: списание товара переехало на переход
+to_issue → issued (было printed → issued). Печать/подпись собираются пачкой
+позже и статус выдачи не двигают (см. test_batch_signature_flow.py).
+
+Covers the two items architecture §9 calls mandatory: конкурентное списание
+последнего товара при issue(), и защита от двойного issue().
 """
 
 import asyncio
@@ -73,13 +75,14 @@ async def _create_request(qty: str, *, warehouse_id: int = c.WAREHOUSE_ISS) -> i
         return req.id
 
 
-async def _make_printed_request(qty: str, *, warehouse_id: int = c.WAREHOUSE_ISS) -> int:
-    """draft → confirm → print, возвращает id заявки в статусе printed."""
+async def _make_issuable_request(qty: str, *, warehouse_id: int = c.WAREHOUSE_ISS) -> int:
+    """draft → confirm, возвращает id заявки в статусе to_issue («К выдаче»).
+
+    Фича 13 (спека §2): выдача (issue) идёт прямо из to_issue — печать больше не
+    шлюз, она собирается пачкой ПОСЛЕ выдачи."""
     rid = await _create_request(qty, warehouse_id=warehouse_id)
     async with SessionLocal() as s:
         await IssuanceService(s).confirm_request(request_id=rid, employee_id=c.TEACHER_ID)
-    async with SessionLocal() as s:
-        await IssuanceService(s).print_request(request_id=rid)
     return rid
 
 
@@ -98,18 +101,20 @@ async def _request_status(session, request_id: int) -> str:
 
 
 async def _inv2_holds(session) -> bool:
-    """INV-2: (status='issued') == (writeoff_id IS NOT NULL) для ВСЕХ заявок."""
+    """INV-2 (спека13 §2): (status IN issued/signed/submitted) ==
+    (writeoff_id IS NOT NULL) для ВСЕХ заявок."""
     row = await session.execute(
         text(
             "SELECT count(*) FROM requests "
-            "WHERE (status = 'issued') != (writeoff_id IS NOT NULL)"
+            "WHERE (status IN ('issued','signed','submitted')) "
+            "!= (writeoff_id IS NOT NULL)"
         )
     )
     return row.scalar_one() == 0
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 1. Полный цикл: остаток падает РОВНО на issue(), не раньше (SV-4/ADR-3).
+# 1. Остаток падает РОВНО на issue(), не на confirm (SV-4/спека13 §1).
 # ─────────────────────────────────────────────────────────────────────
 
 
@@ -122,23 +127,21 @@ async def test_stock_untouched_until_issue_sv4(session):
         await IssuanceService(s).confirm_request(request_id=rid, employee_id=c.TEACHER_ID)
     b_confirm = await _balance(session)
 
-    async with SessionLocal() as s:
-        await IssuanceService(s).print_request(request_id=rid)
-    b_print = await _balance(session)
-
-    assert b_draft == b_confirm == b_print == Decimal("100")
+    # to_issue («К выдаче») — товар ещё НЕ списан (спека §1: списание в момент issue).
+    assert b_draft == b_confirm == Decimal("100")
+    assert await _request_status(session, rid) == "to_issue"
 
 
 async def test_issue_posts_writeoff_and_drops_stock_exactly_once(session):
     await _seed_stock("100")
-    rid = await _make_printed_request("10")
+    rid = await _make_issuable_request("10")
 
     async with SessionLocal() as s:
         req_out, writeoff_out = await IssuanceService(s).issue_request(
             request_id=rid, author_id=c.ADMIN_ID
         )
 
-    assert await _balance(session) == Decimal("90")  # 100 − 10
+    assert await _balance(session) == Decimal("90")  # 100 − 10 списано на issue()
 
     mv_count = await session.execute(
         text("SELECT count(*) FROM stock_movements WHERE doc_type='writeoff'")
@@ -160,13 +163,13 @@ async def test_issue_posts_writeoff_and_drops_stock_exactly_once(session):
 async def test_double_issue_race_yields_exactly_one_writeoff(session, new_session):
     """SV-5/INV-2: два ПАРАЛЛЕЛЬНЫХ issue() одной заявки.
 
-    Остатка хватает на обе выдачи (50 ≥ 2×10) — это намеренно: второй
-    issue() обязан упасть на условном UPDATE ... WHERE status='printed'
-    (Conflict), а НЕ на нехватке товара (InsufficientStock). Так тест
-    отделяет защиту от двойного списания (SV-5) от защиты остатка (SV-3).
+    Остатка хватает на обе выдачи (50 ≥ 2×10) — это намеренно: второй issue()
+    обязан упасть на условном UPDATE ... WHERE status='to_issue' (Conflict), а НЕ
+    на нехватке товара (InsufficientStock). Так тест отделяет защиту от двойного
+    списания (SV-5) от защиты остатка (SV-3).
     """
     await _seed_stock("50")
-    rid = await _make_printed_request("10")
+    rid = await _make_issuable_request("10")
 
     async def issue_once():
         async with new_session() as s:
@@ -201,19 +204,12 @@ async def test_double_issue_race_yields_exactly_one_writeoff(session, new_sessio
 
 
 async def test_double_issue_race_last_unit_of_stock(session, new_session):
-    """Дополнительный вариант конкурентного списания, явно упомянутый
-    архитектурой §9: гонка за ПОСЛЕДНИЙ доступный товар (остаток == qty
-    заявки, без запаса). issue_request() берёт `FOR UPDATE` на stock_balances
-    (шаг 2, ledger.post) РАНЬШЕ условного `UPDATE ... WHERE status='printed'`
-    (шаг 3, SV-5) — поэтому здесь, в отличие от
-    test_double_issue_race_yields_exactly_one_writeoff (где остатка хватает
-    на оба списания и раньше срабатывает именно SV-5-конфликт), проигравшая
-    гонку транзакция детерминированно видит остаток 0 и получает
-    InsufficientStock, а не Conflict: она блокируется на FOR UPDATE, пока
-    победитель не закоммитит, и разблокируется уже на нулевом остатке. В
-    любом случае — ровно один успех, склад не уходит в минус (INV-1)."""
+    """Гонка за ПОСЛЕДНИЙ доступный товар (остаток == qty заявки). issue_request()
+    берёт `FOR UPDATE` на stock_balances (ledger.post) РАНЬШЕ условного
+    `UPDATE ... WHERE status='to_issue'` — проигравшая гонку транзакция видит
+    остаток 0 и получает InsufficientStock. Ровно один успех, склад не в минус."""
     await _seed_stock("10")
-    rid = await _make_printed_request("10")  # ровно весь остаток
+    rid = await _make_issuable_request("10")  # ровно весь остаток
 
     async def issue_once():
         async with new_session() as s:
@@ -238,17 +234,16 @@ async def test_double_issue_race_last_unit_of_stock(session, new_session):
 
 async def test_inv2_check_is_immediate_not_deferrable(session):
     """Почему issue() обязан менять status и writeoff_id ОДНИМ UPDATE:
-    попытка выставить status='issued', оставив writeoff_id=NULL (имитация
-    «сначала статус, потом проводка»), должна быть отвергнута БД НА ТОМ ЖЕ
-    операторе — CHECK ck_requests_issued_iff_posted немедленный, не
-    DEFERRABLE."""
+    попытка выставить status='issued', оставив writeoff_id=NULL, должна быть
+    отвергнута БД НА ТОМ ЖЕ операторе — CHECK ck_requests_issued_iff_posted
+    немедленный, не DEFERRABLE (спека13 §2 расширил его на signed/submitted)."""
     from sqlalchemy import update
 
     from app.modules.issuance.models import Request
     from app.shared.enums import RequestStatus
 
     await _seed_stock("50")
-    rid = await _make_printed_request("10")
+    rid = await _make_issuable_request("10")
 
     rejected = False
     async with SessionLocal() as s:
@@ -266,27 +261,26 @@ async def test_inv2_check_is_immediate_not_deferrable(session):
 
     assert rejected, "CHECK ck_requests_issued_iff_posted обязан сработать немедленно"
     # Заявка не должна была измениться отменённой попыткой.
-    assert await _request_status(session, rid) == "printed"
+    assert await _request_status(session, rid) == "to_issue"
 
 
 # ─────────────────────────────────────────────────────────────────────
 # 3. issue() при недостатке товара → InsufficientStock, статус остаётся
-#    printed, проводки/движения нет (SV-3 применительно к issue()).
+#    to_issue, проводки/движения нет (SV-3 применительно к issue()).
 # ─────────────────────────────────────────────────────────────────────
 
 
 async def test_issue_with_insufficient_stock_rolls_back_fully(session):
     await _seed_stock("5")
-    rid = await _make_printed_request("10")  # заявка на 10, на складе только 5
+    rid = await _make_issuable_request("10")  # заявка на 10, на складе только 5
 
     with pytest.raises(InsufficientStock):
         async with SessionLocal() as s:
             await IssuanceService(s).issue_request(request_id=rid, author_id=c.ADMIN_ID)
 
-    assert await _request_status(session, rid) == "printed"
+    assert await _request_status(session, rid) == "to_issue"
     wc = await session.execute(text("SELECT count(*) FROM writeoffs"))
     assert wc.scalar_one() == 0
-    # Только writeoff-движений быть не должно; акт приобретения (сид) — законное.
     mv = await session.execute(
         text("SELECT count(*) FROM stock_movements WHERE doc_type = 'writeoff'")
     )
@@ -307,8 +301,7 @@ async def test_request_from_non_issuance_warehouse_rejected_by_service():
 
 async def test_request_from_non_issuance_warehouse_rejected_at_db_level(session):
     """Триггер requests_check_issuance_warehouse — последний рубеж SV-9,
-    независимый от сервисного слоя. Проверяем это, вставляя строку в
-    requests НАПРЯМУЮ, в обход IssuanceService."""
+    независимый от сервисного слоя."""
     from sqlalchemy.exc import DBAPIError
 
     with pytest.raises(DBAPIError):
@@ -322,7 +315,6 @@ async def test_request_from_non_issuance_warehouse_rejected_at_db_level(session)
             )
             await s.commit()
 
-    # Ничего не должно было вставиться — транзакция откатилась целиком.
     cnt = await session.execute(
         text("SELECT count(*) FROM requests WHERE number = 'REQ-TEST-DIRECT'")
     )

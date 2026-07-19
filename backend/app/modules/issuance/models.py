@@ -116,26 +116,68 @@ class WriteoffItem(Base):
     writeoff: Mapped["Writeoff"] = relationship(back_populates="items")
 
 
+class SignatureBatch(Base):
+    """Пачка печати/подписи заявок (фича 13, спека §3). Только для товара.
+
+    Админ на экране «К подписи» выбирает выданные заявки → создаётся пачка,
+    им проставляется batch_id и печатается ОДИН PDF, сгруппированный по
+    сотрудникам. Печать статус заявки не меняет (признак «напечатано» =
+    batch_id IS NOT NULL). «Пачка подписана» переводит issued → signed.
+    """
+
+    __tablename__ = "signature_batches"
+    __table_args__ = (
+        # Период пачки: начало не позже конца. В спеке §3 не задан явно, но
+        # период from > to бессмысленен — ставим последний рубеж в БД.
+        CheckConstraint(
+            "period_from <= period_to", name="ck_signature_batches_period_order"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Серверная серия номеров, как у прочих документов (спека §7).
+    number: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    period_from: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    period_to: Mapped[dt.date] = mapped_column(Date, nullable=False)
+    created_by: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    printed_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    signed_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    pdf_url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # MinIO
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class Request(Base):
     """Заявка сотрудника на получение товара — документ-основание (ADR-2)."""
 
     __tablename__ = "requests"
     __table_args__ = (
         CheckConstraint("length(trim(reason)) > 0", name="ck_requests_reason_not_blank"),
-        # INV-2 — ГЛАВНАЯ защита модели ADR-2: выдана ⟺ есть проводка
+        # INV-2 — ГЛАВНАЯ защита модели ADR-2 (обновлена фичей 13, спека §2):
+        # проводка есть на issued/signed/submitted, т.е. «выдана-и-дальше ⟺
+        # есть проводка». Списание рождает writeoff на to_issue → issued.
         CheckConstraint(
-            "(status = 'issued') = (writeoff_id IS NOT NULL)",
+            "(status IN ('issued','signed','submitted')) = (writeoff_id IS NOT NULL)",
             name="ck_requests_issued_iff_posted",
         ),
         # INV-3: одна проводка не принадлежит двум заявкам.
         # Заодно покрывает AP-11 (проводка → заявка → бумага): отдельный
         # индекс по writeoff_id не создаём, это был бы дубль B-tree.
         UniqueConstraint("writeoff_id", name="uq_requests_writeoff_id"),
-        # AP-2 + AP-3: частичный индекс — очередь «К печати» и бейдж-счётчик.
-        Index("ix_requests_to_print", "id", postgresql_where=text("status = 'to_print'")),
         # AP-4: «мои заявки»
         Index("ix_requests_employee_created", "employee_id", text("created_at DESC")),
         Index("ix_requests_warehouse_id", "warehouse_id"),
+        # Фильтр-карточки экрана «Выдачи товара» (спека §5): К выдаче/К подписи/
+        # Подписано/Передано = четыре значения status. Один b-tree по status
+        # обслуживает все четыре COUNT-а — прежний частичный ix_requests_to_print
+        # (одна очередь) снят миграцией 0002 вместе со значением to_print.
         Index("ix_requests_status", "status"),
     )
 
@@ -174,8 +216,23 @@ class Request(Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # ── Фича 13 (спека §3): пачка печати/подписи ──
+    # Признак «напечатано» = batch_id IS NOT NULL. RESTRICT: пачку с заявками
+    # нельзя удалить, не отвязав заявки. Ставит сервер (пакетная печать).
+    batch_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("signature_batches.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    # ── Фича 13 (спека §4): передача в бухгалтерию ──
+    # bulk-действие signed → submitted; один submitted_register_no на пачку
+    # передачи. Ставит сервер, клиент не присылает.
+    submitted_at: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    submitted_register_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     writeoff: Mapped["Writeoff | None"] = relationship()
+    batch: Mapped["SignatureBatch | None"] = relationship()
     items: Mapped[list["RequestItem"]] = relationship(
         back_populates="request", cascade="all, delete-orphan"
     )

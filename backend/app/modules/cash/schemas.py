@@ -14,11 +14,15 @@
                          (author_id — сервер из JWT; api.create=false)
 
   money_expense  List:   id cash_desk_id employee_id expense_category_id amount date
-                 Read:   + description receipt_url
+                         submitted_at submitted_register_no
+                 Read:   + description receipt_url submitted_at submitted_register_no
                  Create: expense_category_id amount description receipt_url date
                          cash_desk_id — СЕРВЕР из users.category (SV-6, api.create=false)
                          employee_id  — СЕРВЕР из JWT (api.create=false)
                          receipt_url  — СЕРВЕР из загруженного файла (multipart)
+
+  Фича 13 (спека §4): submitted_at/submitted_register_no — server-managed
+  read-поля (bulk «Передать в бухгалтерию»), выведены в List+Read.
 
 ПОЧЕМУ НЕТ `MoneyExpenseCreate`. Расход денег — это multipart-запрос: поля формы
 плюс ФАЙЛ чека (receipt_url в контракте помечен api.create=true, но физически
@@ -94,6 +98,9 @@ class MoneyExpenseList(BaseModel):
     expense_category_id: int
     amount: Decimal
     date: dt.date
+    # ── Фича 13 (спека §4): передача расхода в бухгалтерию ──
+    submitted_at: dt.date | None
+    submitted_register_no: str | None
 
 
 class MoneyExpenseRead(BaseModel):
@@ -107,6 +114,9 @@ class MoneyExpenseRead(BaseModel):
     description: str
     receipt_url: str
     date: dt.date
+    # ── Фича 13 (спека §4): передача расхода в бухгалтерию ──
+    submitted_at: dt.date | None
+    submitted_register_no: str | None
 
 
 # ── multipart-конверт расхода (вне проверки контракта: нет суффикса) ──
@@ -124,3 +134,38 @@ class MoneyExpenseSubmission(BaseModel):
     amount: Decimal = Field(gt=0, description="Сумма расхода, UZS, > 0")
     description: str = Field(min_length=1, description="На что потрачено (непустое)")
     date: dt.date
+
+
+# ── Транспортные конверты передачи в бухгалтерию (вне проверки контракта:
+#    нет суффикса Create/Update/Read/List — это не проекции таблицы) ──
+
+
+class ExpenseSubmitRequest(BaseModel):
+    """POST /cash/expenses/submit-to-accounting (спека13 §4): список расходов.
+
+    У денег НЕТ этапа подписи — чек заменяет подпись, расход готов к передаче
+    сразу после проведения. Исключённые (снятая галочка) в список не попадают.
+    """
+
+    ids: list[int] = Field(min_length=1, description="Идентификаторы расходов")
+
+
+class ExpenseSubmitResult(BaseModel):
+    """Ответ передачи расходов: общий submitted_register_no на весь вызов."""
+
+    register_no: str | None = None
+    submitted: list[int] = []
+    skipped: list[int] = []
+
+
+class ExpenseRegistryRow(BaseModel):
+    """Строка реестра передачи денег (спека13 §4): доказательство передачи."""
+
+    id: int
+    employee_id: int
+    expense_category_id: int
+    amount: Decimal
+    date: dt.date
+    description: str
+    submitted_at: dt.date | None
+    submitted_register_no: str | None
