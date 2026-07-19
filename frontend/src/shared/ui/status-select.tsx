@@ -1,5 +1,5 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select";
-import type { CatalogStatus } from "@/shared/api/schema";
+import type { CatalogStatus } from "@/shared/api/model-types";
 import type { FieldAria } from "./form-field";
 
 interface StatusSelectProps {

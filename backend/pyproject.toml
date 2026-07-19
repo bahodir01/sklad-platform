@@ -27,7 +27,15 @@ dependencies = [
     "pydantic-settings>=2.6",
     "pyjwt>=2.10",
     "argon2-cffi>=23.1",
-    "redis>=5.2",
+    # Redis — брокер/backend Celery и кеш приложения. Пин <6 намеренный: Redis-
+    # сервер в целевом окружении версии 5 не знает RESP3 (HELLO появился в 7.4),
+    # а redis-py 5.x по умолчанию говорит RESP2 и совместим. redis-py 6+ уводит
+    # дефолт в RESP3 → HELLO → падение соединения. См. tasks/celery_app.py.
+    "redis>=5.2,<6",
+    # Фоновые задачи (архитектура §8): worker + beat. Django НЕ используется —
+    # Celery подключён как самостоятельная библиотека. celery[redis] тянет kombu
+    # и redis-транспорт. Пин <6 — синхронно с мажором API 5.x.
+    "celery[redis]>=5.4,<6",
     "python-multipart>=0.0.17",
     # Печатные формы (ТЗ §2.1, архитектура §8). Импортируется ЛЕНИВО в
     # shared/pdf.py: при отсутствии нативных зависимостей (pango/cairo) на

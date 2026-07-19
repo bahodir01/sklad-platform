@@ -14,3 +14,26 @@ export function useWarehouses(params: QueryValueMap) {
 export function useWarehouse(id: number | null, enabled = true) {
   return useCatalogDetail<WarehouseRead>("warehouses", id, enabled);
 }
+
+/** Активные склады для селекта уведомления (choice_model `GET /warehouses?status=active`). */
+export function useActiveWarehouses() {
+  return useCatalogList<Warehouse>("warehouses", { status: "active", size: 200, page: 1 });
+}
+
+/**
+ * Склады списания для формы заявки: allows_issuance=true AND status=active
+ * (AP-12, SV-9). Сотрудник подаёт заявку только с такого склада.
+ */
+export function useIssuanceWarehouses() {
+  return useCatalogList<Warehouse>("warehouses", {
+    allows_issuance: true,
+    status: "active",
+    size: 200,
+    page: 1,
+  });
+}
+
+/** Все склады для резолва названия по warehouse_id (списки документов/заявок). */
+export function useWarehousesForResolve() {
+  return useCatalogList<Warehouse>("warehouses", { size: 200, page: 1 });
+}

@@ -1,5 +1,5 @@
 import { Badge } from "./badge";
-import type { CatalogStatus } from "@/shared/api/schema";
+import type { CatalogStatus } from "@/shared/api/model-types";
 
 /**
  * Статус active|archived текстом + цветом (§11: цвет никогда не единственный

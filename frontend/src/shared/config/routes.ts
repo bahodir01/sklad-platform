@@ -15,18 +15,26 @@ export const ROUTES = {
 
   forbidden: "/403",
 
-  // ── Зарезервировано (этапы 2–6), НЕ строится на этапе 1 ──────────
-  dashboard: "/dashboard",
+  // ── М4 Заявки / очередь печати (admin) + реестр ─────────────────
   toPrint: "/to-print",
+  registry: "/registry",
+
+  // ── М2 Документы (admin) ────────────────────────────────────────
   notifications: "/notifications",
   acquisitions: "/acquisitions",
   transfers: "/transfers",
-  writeoffs: "/writeoffs",
-  stock: "/stock",
-  cash: "/cash",
+  writeoffs: "/writeoffs", // admin: прямое списание порча/брак (§4.4)
+
+  // ── М5 Кассы ────────────────────────────────────────────────────
+  cash: "/cash", // admin: приход + балансы
+  myExpenses: "/my/expenses", // сотрудник: расход + свои расходы
+
+  // ── М6 Отчёты (admin) ───────────────────────────────────────────
   reports: "/reports",
+
+  // ── М4 Мои заявки (сотрудник) ───────────────────────────────────
   myRequests: "/my/requests",
 } as const;
 
-/** Точка входа после логина. teacher/worker до этапа 3 идут туда же (Ф-4). */
+/** Точка входа после логина зависит от роли — вычисляется в <RoleHome/>. */
 export const HOME_ROUTE = ROUTES.products;

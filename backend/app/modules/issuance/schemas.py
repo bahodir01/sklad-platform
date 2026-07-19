@@ -32,7 +32,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.enums import RequestStatus
+from app.shared.enums import RequestStatus, UserCategory
 
 # ── request_items ───────────────────────────────────────────────────
 
@@ -70,13 +70,23 @@ class RequestCreate(BaseModel):
 
 
 class RequestList(BaseModel):
-    """get_index-состав. Ни reason, ни printed_at, ни pdf_url здесь нет."""
+    """get_index-состав. Ни reason, ни printed_at, ни pdf_url здесь нет.
+
+    employee_full_name / employee_category — ВЫЧИСЛЯЕМЫЕ поля (§6.3: очередь «К
+    печати» показывает «ФИО и категорию сотрудника», а не только employee_id).
+    Резолвятся JOIN-ом на `users` по employee_id в репозитории — тот же приём,
+    что в отчёте ДДС (reports). Колонками словаря НЕ являются, поэтому вынесены в
+    __contract_extra_fields__ (как computed-величины отчётов), а не в контракт.
+    """
 
     model_config = ConfigDict(from_attributes=True)
+    __contract_extra_fields__ = {"employee_full_name", "employee_category"}
 
     id: int
     number: str
     employee_id: int
+    employee_full_name: str | None = None
+    employee_category: UserCategory | None = None
     warehouse_id: int
     status: RequestStatus
     issued_at: dt.datetime | None
@@ -86,11 +96,15 @@ class RequestList(BaseModel):
 
 class RequestRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    __contract_extra_fields__ = {"items"}
+    # items — вложенные строки; employee_full_name/employee_category —
+    # вычисляемые (JOIN на users, §6.3/§6.4). Ни то, ни другое не колонка словаря.
+    __contract_extra_fields__ = {"items", "employee_full_name", "employee_category"}
 
     id: int
     number: str
     employee_id: int
+    employee_full_name: str | None = None
+    employee_category: UserCategory | None = None
     warehouse_id: int
     reason: str
     status: RequestStatus
@@ -206,6 +220,9 @@ class RegistryRow(BaseModel):
     writeoff_id: int
     writeoff_number: str
     employee_id: int
+    # §6.4: ФИО+категория сотрудника рядом с ОБОИМИ номерами. JOIN на users.
+    employee_full_name: str | None = None
+    employee_category: UserCategory | None = None
     warehouse_id: int
     issued_at: dt.datetime | None
     writeoff_date: dt.date

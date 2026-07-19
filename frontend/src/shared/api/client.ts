@@ -18,6 +18,11 @@ export interface RequestOptions {
   method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   query?: Record<string, QueryValue>;
   body?: unknown;
+  /** Тело multipart/form-data (расход денег с чеком, §5.4). Content-Type не
+   *  выставляем вручную — браузер добавит boundary. */
+  formData?: FormData;
+  /** Доп. заголовки (напр. Idempotency-Key на выдаче, §6). */
+  headers?: Record<string, string>;
   /** true для /auth/login и /auth/refresh — иначе ретрай-рекурсия по 401. */
   skipAuthRetry?: boolean;
   signal?: AbortSignal;
@@ -61,12 +66,15 @@ async function parseError(res: Response): Promise<ApiError> {
 }
 
 async function rawFetch(path: string, options: RequestOptions): Promise<Response> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...options.headers };
   const token = tokenStore.get();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   let bodyInit: BodyInit | undefined;
-  if (options.body !== undefined) {
+  if (options.formData !== undefined) {
+    // multipart: Content-Type ставит браузер сам (с boundary).
+    bodyInit = options.formData;
+  } else if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
     bodyInit = JSON.stringify(options.body);
   }
@@ -114,10 +122,46 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return (await res.json()) as T;
 }
 
+/**
+ * Бинарный ответ (PDF/HTML-бланк, экспорт xlsx/pdf отчётов). Отдельно от
+ * request<T>, потому что тело — не JSON, а Blob. Single-flight refresh на 401
+ * применяется так же (Bearer в памяти, cookie window.open бы не отправил).
+ */
+export async function requestBlob(
+  path: string,
+  options: RequestOptions = {},
+): Promise<Blob> {
+  let res: Response;
+  try {
+    res = await rawFetch(path, options);
+  } catch {
+    throw ApiError.network();
+  }
+  if (res.status === 401 && !options.skipAuthRetry) {
+    const ok = await refreshAccessToken();
+    if (ok) {
+      try {
+        res = await rawFetch(path, options);
+      } catch {
+        throw ApiError.network();
+      }
+    } else {
+      handleAuthLost();
+      throw await parseError(res);
+    }
+  }
+  if (!res.ok) throw await parseError(res);
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string, query?: Record<string, QueryValue>, signal?: AbortSignal) =>
     request<T>(path, { method: "GET", query, signal }),
   post: <T>(path: string, body?: unknown, opts?: Partial<RequestOptions>) =>
     request<T>(path, { method: "POST", body, ...opts }),
+  postForm: <T>(path: string, formData: FormData, opts?: Partial<RequestOptions>) =>
+    request<T>(path, { method: "POST", formData, ...opts }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
+  getBlob: (path: string, query?: Record<string, QueryValue>) =>
+    requestBlob(path, { method: "GET", query }),
 };

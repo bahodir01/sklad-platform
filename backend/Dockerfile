@@ -9,8 +9,11 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # build-essential нужен argon2-cffi (ТЗ §7: пароли только Argon2id).
+# postgresql-client — бинарь pg_dump для задачи db_backup (архитектура §8: «pg_dump
+# в MinIO»). Без него задача молча падала бы в COPY-фолбэк; с ним основной путь —
+# настоящий восстановимый через pg_restore custom-дамп.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl \
+    && apt-get install -y --no-install-recommends build-essential curl postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Слой зависимостей отдельно от кода: правка роутера не пересобирает pip-слой.

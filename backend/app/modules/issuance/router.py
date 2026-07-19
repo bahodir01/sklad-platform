@@ -138,6 +138,8 @@ async def requests_registry(
             writeoff_id=w.id,
             writeoff_number=w.number,
             employee_id=r.employee_id,
+            employee_full_name=r.employee_full_name,
+            employee_category=r.employee_category,
             warehouse_id=r.warehouse_id,
             issued_at=r.issued_at,
             writeoff_date=w.date,

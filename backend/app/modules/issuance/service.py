@@ -492,12 +492,12 @@ class IssuanceService:
 
     async def _reload(self, request_id: int) -> Request:
         """Свежая заявка со строками после условного UPDATE (populate_existing:
-        синхронизируем in-session объект с БД, а не отдаём устаревший из карты)."""
-        return await self._session.scalar(
-            select(Request)
-            .where(Request.id == request_id)
-            .options(selectinload(Request.items))
-            .execution_options(populate_existing=True)
+        синхронизируем in-session объект с БД, а не отдаём устаревший из карты).
+
+        Через репозиторий — он же довешивает ФИО/категорию сотрудника (§6.3).
+        """
+        return await self._repo.get_request_with_items(
+            request_id, populate_existing=True
         )
 
     async def _commit(self) -> None:

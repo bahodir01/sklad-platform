@@ -1,5 +1,5 @@
 import { Navigate, Outlet } from "react-router-dom";
-import type { UserRole } from "@/shared/api/schema";
+import type { UserRole } from "@/shared/api/model-types";
 import { ROUTES } from "@/shared/config/routes";
 import { useMe } from "../api/use-me";
 

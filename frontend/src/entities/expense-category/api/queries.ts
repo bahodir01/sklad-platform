@@ -6,3 +6,12 @@ import type { ExpenseCategory } from "../model/types";
 export function useExpenseCategories(params: QueryValueMap) {
   return useCatalogList<ExpenseCategory>("expense-categories", params);
 }
+
+/** Активные виды расхода денег для селекта расхода/ДДС (только status=active). */
+export function useActiveExpenseCategories() {
+  return useCatalogList<ExpenseCategory>("expense-categories", {
+    status: "active",
+    size: 200,
+    page: 1,
+  });
+}

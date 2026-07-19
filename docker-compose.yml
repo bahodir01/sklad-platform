@@ -1,9 +1,13 @@
-# dev-окружение этапа 1: api, db, redis, minio.
+# dev-окружение: api, worker, beat, db, redis, minio (архитектура §3).
 #
-# worker/beat (Celery) и nginx из архитектуры §3 здесь ещё нет: фоновые
-# задачи появляются с этапа 3 (PDF), а TLS-терминация — забота prod-compose.
-# Класть их сейчас пустыми контейнерами — держать в репозитории то,
-# что никто не запускает и не чинит.
+# worker + beat (Celery, архитектура §8) добавлены на этапе фоновых задач:
+# worker исполняет очередь (PDF-прогрев, export_report, reconcile_stock,
+# monthly_income_draft, db_backup), beat ставит регламентные задачи по
+# расписанию. nginx (TLS-терминация) остаётся заботой prod-compose.
+#
+# Redis здесь redis:7-alpine — знает и RESP2, и RESP3. redis-py в проекте пиннут
+# <6 (RESP2), что совместимо с Redis 7 и одновременно с Redis 5 в других средах.
+# Поэтому broker/backend URL идут БЕЗ ?protocol=2 — RESP2 обеспечивает клиент.
 
 name: sklad
 
@@ -41,6 +45,66 @@ services:
     command: >
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    restart: unless-stopped
+
+  # ── Celery worker (архитектура §8) ────────────────────────────────────
+  # Исполняет очередь фоновых задач. Тот же образ, что api (общий код и модели),
+  # но НЕ мигрирует БД и НЕ слушает HTTP — только тянет задачи из брокера.
+  # Пул prefork (дефолт) годится в Linux-контейнере; --pool=solo нужен лишь на
+  # Windows-dev. worker_prefetch_multiplier=1 (в celery_app) держит тяжёлые
+  # задачи по одной, не набивая пачку в один процесс.
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sklad:sklad@db:5432/sklad
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
+      ENVIRONMENT: dev
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - ./backend/app:/app/app:ro
+    command: >
+      celery -A app.tasks.celery_app:celery_app worker
+      --loglevel=INFO --concurrency=2
+    restart: unless-stopped
+
+  # ── Celery beat (архитектура §8) ──────────────────────────────────────
+  # Планировщик регламентных задач: reconcile_stock (03:00), db_backup (02:00),
+  # monthly_income_draft (1-е число). Ровно ОДИН экземпляр beat на кластер —
+  # иначе расписание задвоится. Задачи сам НЕ исполняет, только ставит их в
+  # очередь; исполняет их worker выше.
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sklad:sklad@db:5432/sklad
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
+      ENVIRONMENT: dev
+    volumes:
+      - ./backend/app:/app/app:ro
+    command: >
+      celery -A app.tasks.celery_app:celery_app beat
+      --loglevel=INFO --schedule /tmp/celerybeat-schedule
     restart: unless-stopped
 
   db:

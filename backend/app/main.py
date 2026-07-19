@@ -20,6 +20,7 @@ import app.models  # noqa: F401
 from app.core.audit import AuditMiddleware
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
+from app.modules.admin.router import router as admin_router
 from app.modules.auth.router import router as auth_router
 from app.modules.auth.tokens import close_redis, get_redis
 from app.modules.cash.router import router as cash_router
@@ -77,6 +78,9 @@ app.include_router(cash_router, prefix=settings.api_prefix)
 # ЭТАП 6 «Отчётность» (ТЗ §11): остатки, недокуп, история, ДДС + экспорт
 # xlsx/pdf (modules/reports). Read-only поверх готовых таблиц, новых моделей нет.
 app.include_router(reports_router, prefix=settings.api_prefix)
+# М7 «Администрирование»: алерты админ-панели (Q3 заказчика — уведомления внутри
+# панели). Read-only, схему не трогает: алерты выводятся из состояния на лету.
+app.include_router(admin_router, prefix=settings.api_prefix)
 
 
 @app.get("/health", tags=["ops"], summary="Liveness-проба")

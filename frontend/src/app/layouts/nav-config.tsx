@@ -1,30 +1,30 @@
 import {
-  LayoutDashboard,
   Printer,
+  ClipboardList,
+  FileText,
+  Wallet,
   Bell,
   PlusCircle,
   ArrowLeftRight,
-  PackageMinus,
-  Boxes,
-  ArrowDownUp,
-  Wallet,
   BarChart3,
   Package,
   Ruler,
   Warehouse,
+  PackageMinus,
   Coins,
   type LucideIcon,
 } from "lucide-react";
+import type { UserRole } from "@/shared/api/model-types";
 import { ROUTES } from "@/shared/config/routes";
 
 export interface NavItem {
   label: string;
   to: string;
   icon: LucideIcon;
-  /** true — экран этапа 1 (живой). false — заглушка «в разработке». */
-  live: boolean;
-  /** Слот бейджа (напр. счётчик «К печати») — данные появятся на этапе 3. */
-  badge?: number;
+  /** Роли, которым пункт виден. undefined — виден всем аутентифицированным. */
+  roles?: UserRole[];
+  /** Динамический бейдж-счётчик. 'toPrint' — очередь печати (admin, AP-3). */
+  badgeKey?: "toPrint";
 }
 
 export interface NavSection {
@@ -34,48 +34,45 @@ export interface NavSection {
 }
 
 /**
- * Конфиг навигации (макет заказчика). Пункты этапов 2–6 показываются, но ведут
- * на заглушку (live:false). Живой только раздел «Справочники» (М1).
+ * Конфиг навигации (макет заказчика), теперь по ролям. Разделы «Документы»,
+ * «Деньги», «Отчёты» и очередь «К печати» — только admin; «Мои заявки»/«Мои
+ * расходы» — только сотрудник; «Справочники» — всем (чтение любой ролью).
+ * Фильтрация по роли и подстановка бейджа — в AppSidebar.
  */
 export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
-      { label: "Дашборд", to: ROUTES.dashboard, icon: LayoutDashboard, live: false },
-      { label: "К печати", to: ROUTES.toPrint, icon: Printer, live: false },
+      { label: "К печати", to: ROUTES.toPrint, icon: Printer, roles: ["admin"], badgeKey: "toPrint" },
+      { label: "Реестр выданных", to: ROUTES.registry, icon: ClipboardList, roles: ["admin"] },
+      { label: "Мои заявки", to: ROUTES.myRequests, icon: FileText, roles: ["teacher", "worker"] },
+      { label: "Мои расходы", to: ROUTES.myExpenses, icon: Wallet, roles: ["teacher", "worker"] },
     ],
   },
   {
     title: "Документы",
     items: [
-      { label: "Уведомления", to: ROUTES.notifications, icon: Bell, live: false },
-      { label: "Приобретения", to: ROUTES.acquisitions, icon: PlusCircle, live: false },
-      { label: "Перемещения", to: ROUTES.transfers, icon: ArrowLeftRight, live: false },
-      { label: "Расходы товара", to: ROUTES.writeoffs, icon: PackageMinus, live: false },
-    ],
-  },
-  {
-    title: "Склад",
-    items: [
-      { label: "Остатки", to: ROUTES.stock, icon: Boxes, live: false },
-      { label: "Движения", to: `${ROUTES.stock}/movements`, icon: ArrowDownUp, live: false },
+      { label: "Уведомления", to: ROUTES.notifications, icon: Bell, roles: ["admin"] },
+      { label: "Приобретения", to: ROUTES.acquisitions, icon: PlusCircle, roles: ["admin"] },
+      { label: "Перемещения", to: ROUTES.transfers, icon: ArrowLeftRight, roles: ["admin"] },
+      { label: "Списание (порча/брак)", to: ROUTES.writeoffs, icon: PackageMinus, roles: ["admin"] },
     ],
   },
   {
     title: "Деньги",
-    items: [{ label: "Кассы", to: ROUTES.cash, icon: Wallet, live: false }],
+    items: [{ label: "Кассы", to: ROUTES.cash, icon: Coins, roles: ["admin"] }],
   },
   {
     title: "Отчёты",
-    items: [{ label: "Отчёты", to: ROUTES.reports, icon: BarChart3, live: false }],
+    items: [{ label: "Отчёты", to: ROUTES.reports, icon: BarChart3, roles: ["admin"] }],
   },
   {
     title: "Справочники",
     items: [
-      { label: "Номенклатура", to: ROUTES.products, icon: Package, live: true },
-      { label: "Единицы измерения", to: ROUTES.units, icon: Ruler, live: true },
-      { label: "Склады", to: ROUTES.warehouses, icon: Warehouse, live: true },
-      { label: "Типы расхода товара", to: ROUTES.expenseTypes, icon: PackageMinus, live: true },
-      { label: "Виды расхода денег", to: ROUTES.expenseCategories, icon: Coins, live: true },
+      { label: "Номенклатура", to: ROUTES.products, icon: Package },
+      { label: "Единицы измерения", to: ROUTES.units, icon: Ruler },
+      { label: "Склады", to: ROUTES.warehouses, icon: Warehouse },
+      { label: "Типы расхода товара", to: ROUTES.expenseTypes, icon: PackageMinus },
+      { label: "Виды расхода денег", to: ROUTES.expenseCategories, icon: Coins },
     ],
   },
 ];

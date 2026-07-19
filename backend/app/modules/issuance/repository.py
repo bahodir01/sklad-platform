@@ -12,12 +12,27 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.modules.auth.models import User
 from app.modules.catalog.models import ExpenseType, Product, Unit
 from app.modules.issuance.models import Request, Writeoff
 from app.shared.enums import CatalogStatus, RequestStatus
 from app.shared.pagination import PageParams
 
 ProductInfo = namedtuple("ProductInfo", ["name", "unit_code"])
+
+
+def _attach_employee(req: Request, full_name: str, category: Any) -> Request:
+    """Навешивает вычисляемые ФИО+категорию сотрудника на ORM-объект заявки.
+
+    §6.3/§6.4: Read-ответы заявок показывают «ФИО и категорию сотрудника», а не
+    только employee_id. Значения приходят JOIN-ом на `users` (тот же приём, что в
+    отчёте ДДС) и НЕ являются колонками — это ненавязчивые атрибуты экземпляра,
+    которые читает Pydantic (from_attributes) как employee_full_name/…_category.
+    В БД не пишутся, схема не меняется.
+    """
+    req.employee_full_name = full_name
+    req.employee_category = category
+    return req
 
 
 class IssuanceRepository:
@@ -30,12 +45,27 @@ class IssuanceRepository:
         """Заявка без строк — для проверок статуса/владельца."""
         return await self._session.get(Request, request_id)
 
-    async def get_request_with_items(self, request_id: int) -> Request | None:
-        return await self._session.scalar(
-            select(Request)
+    async def get_request_with_items(
+        self, request_id: int, *, populate_existing: bool = False
+    ) -> Request | None:
+        """Заявка со строками + ФИО/категория сотрудника (JOIN на users, §6.3/§6.4).
+
+        populate_existing=True синхронизирует in-session объект с БД после
+        условного UPDATE (был status/writeoff_id меняли синхронизацию сессии).
+        """
+        stmt = (
+            select(Request, User.full_name, User.category)
+            .join(User, Request.employee_id == User.id)
             .where(Request.id == request_id)
             .options(selectinload(Request.items))
         )
+        if populate_existing:
+            stmt = stmt.execution_options(populate_existing=True)
+        row = (await self._session.execute(stmt)).first()
+        if row is None:
+            return None
+        req, full_name, category = row
+        return _attach_employee(req, full_name, category)
 
     async def list_requests(
         self, params: PageParams, *, filters: list[Any] | None = None
@@ -45,18 +75,28 @@ class IssuanceRepository:
         Сортировка (created_at DESC, id DESC) ложится на композитный индекс
         (employee_id, created_at DESC) для «Моих заявок» (AP-4).
         """
-        stmt: Select[tuple[Request]] = select(Request)
+        # JOIN на users: список очереди/«Мои» показывает ФИО+категорию (§6.3),
+        # а не только employee_id. users PK-join дешёвый, частичный индекс
+        # очереди (AP-2) продолжает работать по WHERE status='to_print'.
+        stmt: Select = (
+            select(Request, User.full_name, User.category)
+            .join(User, Request.employee_id == User.id)
+        )
         if filters:
             stmt = stmt.where(*filters)
         total = await self._session.scalar(
             select(func.count()).select_from(stmt.subquery())
         )
-        rows = await self._session.scalars(
+        rows = await self._session.execute(
             stmt.order_by(Request.created_at.desc(), Request.id.desc())
             .offset(params.offset)
             .limit(params.limit)
         )
-        return list(rows), int(total or 0)
+        result = [
+            _attach_employee(req, full_name, category)
+            for req, full_name, category in rows.all()
+        ]
+        return result, int(total or 0)
 
     async def count_requests(self, *, filters: list[Any] | None = None) -> int:
         """AP-3: бейдж-счётчик. WHERE status='to_print' покрыт частичным
@@ -71,10 +111,12 @@ class IssuanceRepository:
     async def registry(
         self, params: PageParams, *, filters: list[Any] | None = None
     ) -> tuple[list[tuple[Request, Writeoff]], int]:
-        """Выданные заявки + их проводки. ОБА номера (ADR-2a)."""
+        """Выданные заявки + их проводки. ОБА номера (ADR-2a) + ФИО/категория
+        сотрудника рядом с номерами (§6.4) — JOIN на users."""
         base: Select = (
-            select(Request, Writeoff)
+            select(Request, Writeoff, User.full_name, User.category)
             .join(Writeoff, Request.writeoff_id == Writeoff.id)
+            .join(User, Request.employee_id == User.id)
             .where(Request.status == RequestStatus.issued)
         )
         if filters:
@@ -87,7 +129,10 @@ class IssuanceRepository:
             .offset(params.offset)
             .limit(params.limit)
         )
-        return [(r, w) for r, w in rows.all()], int(total or 0)
+        return (
+            [(_attach_employee(r, fn, cat), w) for r, w, fn, cat in rows.all()],
+            int(total or 0),
+        )
 
     # ── справочные данные для issue()/бланка ────────────────────────
 

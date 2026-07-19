@@ -115,6 +115,36 @@ def get_object(bucket: str, key: str) -> bytes | None:
     return None
 
 
+def list_objects(bucket: str, prefix: str = "") -> list[str]:
+    """Список ключей объектов в бакете под префиксом. Read-only, без записи.
+
+    Семантика зеркалит get_object: сначала MinIO (list_objects_v2), при
+    недоступности — обход локального фолбэк-каталога. Ключи возвращаются в том
+    же виде, что принимает put_object/get_object (bucket-relative, через «/»).
+    Пустой список — легальный результат (объектов под префиксом нет).
+    """
+    client = _s3_client()
+    if client is not None:
+        try:
+            keys: list[str] = []
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                keys.extend(obj["Key"] for obj in page.get("Contents", []))
+            return keys
+        except Exception:  # noqa: BLE001 — MinIO недоступен/бакета нет → локальный фолбэк
+            pass
+
+    root = os.path.join(_LOCAL_ROOT, bucket)
+    result: list[str] = []
+    if os.path.isdir(root):
+        for dirpath, _dirs, files in os.walk(root):
+            for fn in files:
+                key = os.path.relpath(os.path.join(dirpath, fn), root).replace(os.sep, "/")
+                if key.startswith(prefix):
+                    result.append(key)
+    return result
+
+
 def presigned_url(bucket: str, key: str) -> str | None:
     """Presigned URL с TTL 5 мин (ТЗ §7). None в локальном режиме."""
     client = _s3_client()

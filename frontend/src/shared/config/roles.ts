@@ -1,4 +1,4 @@
-import type { UserRole } from "../api/schema";
+import type { UserRole } from "../api/model-types";
 
 /** Роли RBAC (ТЗ §1, backend shared/enums.py:UserRole). */
 export const ROLES: Record<UserRole, string> = {
