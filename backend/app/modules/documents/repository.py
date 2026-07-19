@@ -66,6 +66,21 @@ class DocumentsRepository:
         )
         return list(rows)
 
+    async def has_acquisitions(self, notification_id: int) -> bool:
+        """Есть ли хоть одно приобретение у уведомления (SV-11).
+
+        Удаление уведомления разрешено ⟺ приобретений нет: они породили бы
+        append-only движения склада (ADR-1). FK acquisitions.notification_id
+        RESTRICT страхует на уровне БД — здесь даём внятный русский отказ ДО
+        отказа constraint-а.
+        """
+        exists = await self._session.scalar(
+            select(func.count())
+            .select_from(Acquisition)
+            .where(Acquisition.notification_id == notification_id)
+        )
+        return bool(exists)
+
     async def purchased_by_product(self, notification_id: int) -> dict[int, Decimal]:
         """Сколько уже приобретено по каждому товару этого уведомления.
 

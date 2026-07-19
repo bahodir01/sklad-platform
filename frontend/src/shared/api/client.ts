@@ -162,6 +162,7 @@ export const api = {
   postForm: <T>(path: string, formData: FormData, opts?: Partial<RequestOptions>) =>
     request<T>(path, { method: "POST", formData, ...opts }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
+  del: <T = void>(path: string) => request<T>(path, { method: "DELETE" }),
   getBlob: (path: string, query?: Record<string, QueryValue>) =>
     requestBlob(path, { method: "GET", query }),
 };

@@ -292,10 +292,12 @@ export interface paths {
         get: operations["get_notification_api_v1_notifications__id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Удалить уведомление (admin, SV-11 — только без приобретений) */
+        delete: operations["delete_notification_api_v1_notifications__id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Редактировать уведомление (admin, SV-10 по статусу) */
+        patch: operations["update_notification_api_v1_notifications__id__patch"];
         trace?: never;
     };
     "/api/v1/notifications/{id}/pdf": {
@@ -309,6 +311,23 @@ export interface paths {
         get: operations["notification_pdf_api_v1_notifications__id__pdf_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/{id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Отправить уведомление в работу (admin, draft → in_progress) */
+        post: operations["submit_notification_api_v1_notifications__id__submit_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1285,6 +1304,23 @@ export interface components {
             /** Qty Remaining */
             qty_remaining?: string | null;
         };
+        /**
+         * NotificationItemUpdate
+         * @description Строка желаемого состояния при PATCH (SV-10).
+         *
+         *     Ключ строки — product_id (UNIQUE(notification_id, product_id) в схеме):
+         *     отсюда add/remove/изменение qty вычисляются диффом по product_id, а не по
+         *     суррогатному id. `id` строки клиент не присылает (api.update=false).
+         */
+        NotificationItemUpdate: {
+            /** Product Id */
+            product_id: number;
+            /**
+             * Qty Requested
+             * @description Заявлено, > 0 (INV-6)
+             */
+            qty_requested: number | string;
+        };
         /** NotificationList */
         NotificationList: {
             /** Id */
@@ -1342,6 +1378,36 @@ export interface components {
          * @enum {string}
          */
         NotificationStatus: "draft" | "in_progress" | "closed";
+        /**
+         * NotificationUpdate
+         * @description PATCH-полезная нагрузка уведомления (SV-10).
+         *
+         *     Все поля опциональны — это partial update: тронуто только то, что клиент
+         *     прислал (различаем через `model_fields_set`). Схема несёт МАКСИМАЛЬНЫЙ набор
+         *     (уровень черновика); что именно позволено в каждом статусе, решает сервис:
+         *       * черновик  — можно всё;
+         *       * в работе  — только тексты + аддитивные правки строк (нельзя менять
+         *                     date/warehouse_id, уменьшать qty ниже приобретённого,
+         *                     удалять строки с приобретениями);
+         *       * закрыт    — ничего.
+         *
+         *     `items`, если прислан, — ЖЕЛАЕМОЕ ПОЛНОЕ состояние строк (диффится по
+         *     product_id). `None`/отсутствие поля означает «строки не трогать».
+         */
+        NotificationUpdate: {
+            /** Date */
+            date?: string | null;
+            /** Warehouse Id */
+            warehouse_id?: number | null;
+            /** Body Text */
+            body_text?: string | null;
+            /** Division Name */
+            division_name?: string | null;
+            /** Comment */
+            comment?: string | null;
+            /** Items */
+            items?: components["schemas"]["NotificationItemUpdate"][] | null;
+        };
         /** Page[ExpenseCategoryList] */
         Page_ExpenseCategoryList_: {
             /** Items */
@@ -2889,6 +2955,72 @@ export interface operations {
             };
         };
     };
+    delete_notification_api_v1_notifications__id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Идентификатор записи */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_notification_api_v1_notifications__id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Идентификатор записи */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     notification_pdf_api_v1_notifications__id__pdf_get: {
         parameters: {
             query?: never;
@@ -2908,6 +3040,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_notification_api_v1_notifications__id__submit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Идентификатор записи */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationRead"];
                 };
             };
             /** @description Validation Error */

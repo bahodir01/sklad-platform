@@ -1,5 +1,6 @@
 """Роутер М2 (архитектура §6, все — admin):
   GET,POST /notifications · GET /notifications/{id} · GET /notifications/{id}/pdf
+  PATCH,DELETE /notifications/{id} · POST /notifications/{id}/submit (ОВ-11)
   POST /acquisitions · POST /transfers
 """
 
@@ -18,6 +19,7 @@ from app.modules.documents.schemas import (
     NotificationCreate,
     NotificationList,
     NotificationRead,
+    NotificationUpdate,
     TransferCreate,
     TransferRead,
 )
@@ -130,6 +132,47 @@ async def notification_pdf(
         media_type="text/html; charset=utf-8",
         headers={"X-PDF-Renderer": "unavailable-html-fallback"},
     )
+
+
+@router.patch(
+    "/notifications/{id}",
+    response_model=NotificationRead,
+    summary="Редактировать уведомление (admin, SV-10 по статусу)",
+)
+async def update_notification(
+    id: EntityId,
+    payload: NotificationUpdate,
+    _: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> Notification:
+    return await DocumentsService(session).update_notification(id, payload)
+
+
+@router.post(
+    "/notifications/{id}/submit",
+    response_model=NotificationRead,
+    summary="Отправить уведомление в работу (admin, draft → in_progress)",
+)
+async def submit_notification(
+    id: EntityId,
+    _: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> Notification:
+    return await DocumentsService(session).submit_notification(id)
+
+
+@router.delete(
+    "/notifications/{id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Удалить уведомление (admin, SV-11 — только без приобретений)",
+)
+async def delete_notification(
+    id: EntityId,
+    _: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    await DocumentsService(session).delete_notification(id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ══════════════════════ acquisitions ════════════════════════════════

@@ -48,7 +48,12 @@ async def _notification(qty: str) -> int:
                 items=[NotificationItemCreate(product_id=c.PRODUCT_ID, qty_requested=Decimal(qty))],
             ),
         )
-        return notif.id
+        nid = notif.id
+    # ОВ-11: отправляем в работу сразу — приобретать можно только против
+    # «в работе»; submit один раз (в _acquire нельзя: закупок может быть несколько).
+    async with SessionLocal() as s:
+        await DocumentsService(s).submit_notification(nid)
+    return nid
 
 
 async def _acquire(nid: int, qty: str) -> None:

@@ -31,7 +31,16 @@ from tests import constants as c
 TODAY = dt.date.today()
 
 
-async def _make_notification(qty_requested: str, *, warehouse_id: int = c.WAREHOUSE_ISS) -> int:
+async def _make_notification(
+    qty_requested: str, *, warehouse_id: int = c.WAREHOUSE_ISS, submit: bool = True
+) -> int:
+    """Создать уведомление и (по умолчанию) отправить его в работу.
+
+    Приобретения теперь возможны ТОЛЬКО против in_progress (ОВ-11): раньше
+    первое приобретение само переводило draft→in_progress, теперь это делает
+    отдельный submit. Тесты закупок хотят готовое к приобретению уведомление,
+    поэтому по умолчанию сразу submit=True.
+    """
     async with SessionLocal() as s:
         notif = await DocumentsService(s).create_notification(
             author_id=c.ADMIN_ID,
@@ -48,7 +57,11 @@ async def _make_notification(qty_requested: str, *, warehouse_id: int = c.WAREHO
                 ],
             ),
         )
-        return notif.id
+        nid = notif.id
+    if submit:
+        async with SessionLocal() as s:
+            await DocumentsService(s).submit_notification(nid)
+    return nid
 
 
 async def _acquire(notification_id: int, qty: str, *, warehouse_id: int = c.WAREHOUSE_ISS):
@@ -137,15 +150,38 @@ async def test_autoclose_on_full_purchase_sv7(session):
     """SV-7: уведомление автоматически закрывается, когда остаток по всем
     строкам становится 0 за одно приобретение."""
     nid = await _make_notification("8")
-    assert await _notification_status(session, nid) == "draft"
+    assert await _notification_status(session, nid) == "in_progress"
 
     await _acquire(nid, "8")
 
     assert await _notification_status(session, nid) == "closed"
 
 
-async def test_notification_moves_to_in_progress_on_partial_purchase(session):
-    """Промежуточное состояние: частичная закупка → in_progress, не closed."""
+async def test_submit_moves_draft_to_in_progress(session):
+    """ОВ-11: submit — единственный переход draft→in_progress (не приобретение)."""
+    nid = await _make_notification("10", submit=False)
+    assert await _notification_status(session, nid) == "draft"
+
+    async with SessionLocal() as s:
+        await DocumentsService(s).submit_notification(nid)
+
+    assert await _notification_status(session, nid) == "in_progress"
+
+
+async def test_acquisition_against_draft_rejected(session):
+    """ОВ-11: приобретать против черновика нельзя — сначала submit."""
+    nid = await _make_notification("10", submit=False)
+    assert await _notification_status(session, nid) == "draft"
+
+    with pytest.raises(DomainError) as exc_info:
+        await _acquire(nid, "1")
+    assert exc_info.value.code == "notification_not_in_progress"
+    # Отказ ничего не провёл.
+    assert await _balance(session) == Decimal("0")
+
+
+async def test_partial_purchase_keeps_in_progress(session):
+    """Частичная закупка не закрывает и не меняет статус: остаётся in_progress."""
     nid = await _make_notification("10")
     await _acquire(nid, "4")
     assert await _notification_status(session, nid) == "in_progress"

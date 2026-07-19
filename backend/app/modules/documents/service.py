@@ -34,6 +34,7 @@ from app.modules.documents.repository import DocumentsRepository
 from app.modules.documents.schemas import (
     AcquisitionCreate,
     NotificationCreate,
+    NotificationUpdate,
     TransferCreate,
 )
 from app.modules.stock import ledger
@@ -112,12 +113,186 @@ class DocumentsService:
         await self._session.refresh(notif, ["status", "created_at"])
         return await self.get_notification_detail(notif.id)
 
+    async def submit_notification(self, notification_id: int) -> Notification:
+        """draft → in_progress: «завсклад отправил в работу» (ОВ-11).
+
+        Единственный путь из черновика в работу. Раньше это ошибочно делало
+        первое приобретение — из-за чего состояние «в работе без приобретений»
+        (нужное правилу удаления SV-11) было недостижимо. Теперь переход —
+        отдельное явное действие, независимое от закупок.
+        """
+        notif = await self._session.get(Notification, notification_id)
+        if notif is None:
+            raise NotFoundError("Уведомление", notification_id)
+        if notif.status != NotificationStatus.draft:
+            raise ValidationError(
+                "Отправить в работу можно только уведомление в статусе «черновик»",
+                code="notification_not_draft",
+            )
+        notif.status = NotificationStatus.in_progress
+        await self._commit()
+        return await self.get_notification_detail(notif.id)
+
+    async def update_notification(
+        self, notification_id: int, payload: NotificationUpdate
+    ) -> Notification:
+        """PATCH уведомления. Правила зависят от статуса (SV-10).
+
+          * черновик — можно всё (тексты, date, warehouse_id, любые правки строк);
+          * в работе — только аддитивно: править тексты, добавлять строки,
+            увеличивать qty; ЗАПРЕТ на смену date/warehouse_id, уменьшение qty
+            ниже приобретённого, удаление строк с приобретениями;
+          * закрыт — любые правки запрещены.
+        """
+        notif = await self._repo.get_notification_with_items(notification_id)
+        if notif is None:
+            raise NotFoundError("Уведомление", notification_id)
+
+        if notif.status == NotificationStatus.closed:
+            raise ValidationError(
+                "Уведомление закрыто — редактирование невозможно",
+                code="notification_closed",
+            )
+
+        provided = payload.model_fields_set
+        is_draft = notif.status == NotificationStatus.draft
+
+        # ── Скалярные поля ──────────────────────────────────────────
+        # Тексты правятся в любом открытом статусе (черновик и в работе).
+        if "comment" in provided:
+            notif.comment = payload.comment
+        if "body_text" in provided:
+            notif.body_text = payload.body_text
+        if "division_name" in provided:
+            notif.division_name = payload.division_name
+
+        # date/warehouse_id — только в черновике: в работе приобретения уже
+        # могли пойти на старый склад, менять назначение задним числом нельзя.
+        if "date" in provided and payload.date != notif.date:
+            if not is_draft:
+                raise ValidationError(
+                    "Дату уведомления можно менять только в черновике",
+                    code="notification_field_locked",
+                )
+            notif.date = payload.date
+        if "warehouse_id" in provided and payload.warehouse_id != notif.warehouse_id:
+            if not is_draft:
+                raise ValidationError(
+                    "Склад назначения можно менять только в черновике "
+                    "(по уведомлению в работе приобретения уже идут на прежний склад)",
+                    code="notification_field_locked",
+                )
+            notif.warehouse_id = payload.warehouse_id
+
+        # ── Строки ──────────────────────────────────────────────────
+        if "items" in provided and payload.items is not None:
+            await self._apply_item_changes(notif, payload.items, is_draft=is_draft)
+
+        await self._commit()
+        return await self.get_notification_detail(notif.id)
+
+    async def _apply_item_changes(
+        self, notif: Notification, desired_items, *, is_draft: bool
+    ) -> None:
+        """Привести строки уведомления к желаемому состоянию (дифф по product_id).
+
+        В черновике — полная замена. В работе — только аддитивно, с проверками
+        против уже приобретённого (SUM acquisition_items под FOR UPDATE).
+        """
+        desired = {it.product_id: it.qty_requested for it in desired_items}
+        if len(desired) != len(desired_items):
+            raise ValidationError(
+                "Товар не должен повторяться в строках одного уведомления",
+                code="duplicate_product",
+            )
+        if not desired:
+            raise ValidationError(
+                "Уведомление должно содержать хотя бы одну строку",
+                code="empty_items",
+            )
+
+        existing = {it.product_id: it for it in notif.items}
+
+        if is_draft:
+            # Черновик: приобретений нет по определению — свободная замена.
+            for pid, item in list(existing.items()):
+                if pid not in desired:
+                    notif.items.remove(item)  # delete-orphan удалит строку
+            for pid, qty in desired.items():
+                if pid in existing:
+                    existing[pid].qty_requested = qty
+                else:
+                    notif.items.append(
+                        NotificationItem(product_id=pid, qty_requested=qty)
+                    )
+            return
+
+        # ── В работе: аддитивные правки под блокировкой строк (SV-1/AP-7) ──
+        await self._repo.lock_notification_items(notif.id)
+        purchased = await self._repo.purchased_by_product(notif.id)
+        affected = set(existing) | set(desired)
+        info = await self._repo.product_info(list(affected))
+
+        def _name(pid: int) -> str:
+            pi = info.get(pid)
+            return pi.name if pi else f"id={pid}"
+
+        # Удаление строки, по которой есть приобретения, — запрещено.
+        for pid, item in list(existing.items()):
+            if pid not in desired:
+                if purchased.get(pid, _ZERO) > _ZERO:
+                    raise ValidationError(
+                        f'Товар "{_name(pid)}": по строке есть приобретения — '
+                        f"удалить её нельзя, пока уведомление в работе",
+                        code="item_has_acquisitions",
+                    )
+                notif.items.remove(item)
+
+        for pid, qty in desired.items():
+            bought = purchased.get(pid, _ZERO)
+            if pid in existing:
+                # Нельзя опустить заявку ниже уже приобретённого по этой строке.
+                if qty < bought:
+                    unit = info[pid].unit_code if pid in info else ""
+                    raise ValidationError(
+                        f'Товар "{_name(pid)}": уже приобретено {_fmt(bought)} {unit}, '
+                        f"нельзя установить заявку {_fmt(qty)} {unit} ниже приобретённого",
+                        code="qty_below_purchased",
+                    )
+                existing[pid].qty_requested = qty
+            else:
+                # Новая строка — аддитивно, всегда допустимо (bought=0).
+                notif.items.append(
+                    NotificationItem(product_id=pid, qty_requested=qty)
+                )
+
+    async def delete_notification(self, notification_id: int) -> None:
+        """Физическое удаление уведомления — SV-11.
+
+        Разрешено ⟺ у уведомления НЕТ ни одного приобретения. Тогда оно не
+        создало ни одного stock_movement и инертно для учёта; удаляется вместе
+        со своими notification_items (CASCADE). Это ПЕРВОЕ разрешённое
+        физудаление документа: SV-8 (запрет удаления) касается только НСИ.
+        """
+        notif = await self._session.get(Notification, notification_id)
+        if notif is None:
+            raise NotFoundError("Уведомление", notification_id)
+        if await self._repo.has_acquisitions(notification_id):
+            raise ValidationError(
+                "Нельзя удалить уведомление: есть связанные приобретения",
+                code="notification_has_acquisitions",
+            )
+        await self._session.delete(notif)
+        await self._commit()
+
     # ══════════════════ Приобретения (SV-1, §5.1) ══════════════════
 
     async def create_acquisition(
         self, *, author_id: int, payload: AcquisitionCreate
     ) -> Acquisition:
-        # 1. Уведомление-основание существует и ещё открыто.
+        # 1. Уведомление-основание существует и находится «в работе».
+        #    Приобретать можно ТОЛЬКО против in_progress (ОВ-11): против
+        #    черновика нельзя (сначала submit), против закрытого — тем более.
         notif = await self._session.get(Notification, payload.notification_id)
         if notif is None:
             raise NotFoundError("Уведомление", payload.notification_id)
@@ -125,6 +300,12 @@ class DocumentsService:
             raise ValidationError(
                 "Уведомление закрыто — приобретение по нему невозможно",
                 code="notification_closed",
+            )
+        if notif.status == NotificationStatus.draft:
+            raise ValidationError(
+                "Уведомление в черновике — отправьте его в работу "
+                "(submit) перед приобретением",
+                code="notification_not_in_progress",
             )
 
         # 2. FOR UPDATE на строках уведомления — против TOCTOU (SV-1/AP-7).
@@ -197,10 +378,10 @@ class DocumentsService:
             purchased.get(pid, _ZERO) + add_by_product.get(pid, _ZERO) >= req
             for pid, req in requested.items()
         )
+        # SV-7 только закрывает; перехода draft→in_progress здесь БОЛЬШЕ НЕТ —
+        # в работу переводит явный submit (ОВ-11). Сюда доходят лишь in_progress.
         if all_closed:
             notif.status = NotificationStatus.closed
-        elif notif.status == NotificationStatus.draft:
-            notif.status = NotificationStatus.in_progress
 
         await self._commit()
         return await self._repo.get_acquisition_with_items(acq.id)

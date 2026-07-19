@@ -291,7 +291,8 @@ A("notifications", "date", doc=D, label="Дата", new_type="date",
   be_type="Date", be_nullable="False", be_db_index="True", be_filter="date__range",
   fe_table_view=Y, fe_input_type="date", fe_required="True",
   fe_validations="required; локальный формат ДД.ММ.ГГГГ",
-  api_get_index=Y, api_get_single=Y, api_create=Y, api_update=N)
+  comments="ОВ-11: update=Y — правится в черновике; в работе смену даты сервис блокирует (SV-10).",
+  api_get_index=Y, api_get_single=Y, api_create=Y, api_update=Y)
 A("notifications", "author_id", doc=D, label="Автор", new_type="bigint FK",
   description="Кто создал уведомление. Проставляется сервером из текущего пользователя.",
   be_type="BigInteger · ForeignKey('users.id', ondelete='RESTRICT')",
@@ -307,7 +308,8 @@ A("notifications", "warehouse_id", doc=D, label="Склад назначения
   be_on_delete="RESTRICT", be_filter="warehouse_id",
   fe_table_view=Y, fe_input_type="select", fe_required="True",
   fe_choice_model="GET /warehouses?status=active",
-  api_get_index=Y, api_get_single=Y, api_create=Y, api_update=N)
+  comments="ОВ-11: update=Y — правится в черновике; в работе смену склада сервис блокирует (приобретения уже пошли на прежний склад, SV-10).",
+  api_get_index=Y, api_get_single=Y, api_create=Y, api_update=Y)
 A("notifications", "status", doc=D + " · SV-7", label="Статус", new_type="enum",
   description="draft | in_progress | closed. Автозакрытие при остатке 0 по всем строкам (SV-7).",
   be_type="SAEnum(NotificationStatus, name='notification_status')",
@@ -322,24 +324,24 @@ A("notifications", "comment", doc=D + " · бланк BILDIRISHNOMA", label="К�
   description="Произвольный комментарий к уведомлению. На бланке BILDIRISHNOMA печатается как «Ehtiyojning asoslanishi» (причина закупки).",
   be_type="Text", be_nullable="True",
   fe_table_view=N, fe_input_type="textarea", fe_required="False",
-  comments="Существующая колонка закрывает «Ehtiyojning asoslanishi» бланка — отдельной колонки под причину НЕ заводим (решение заказчика 17.07.2026). В шаблон notification.html приходит под именем n.justification: имя переменной контекста рендера, не колонки.",
-  api_get_index=N, api_get_single=Y, api_create=Y, api_update=N)
+  comments="Существующая колонка закрывает «Ehtiyojning asoslanishi» бланка — отдельной колонки под причину НЕ заводим (решение заказчика 17.07.2026). В шаблон notification.html приходит под именем n.justification: имя переменной контекста рендера, не колонки. ОВ-11: update=Y — текст правится и в черновике, и в работе (SV-10).",
+  api_get_index=N, api_get_single=Y, api_create=Y, api_update=Y)
 A("notifications", "body_text", doc=D + " · бланк BILDIRISHNOMA", label="Текст обращения", new_type="text",
   description="Абзац-обращение бланка («Sizdan… so‘rayman:»). Тело документа, меняется в каждом уведомлении, пишет администратор.",
   be_type="Text", be_nullable="False",
   be_other="CHECK (length(trim(body_text)) > 0) — тело документа пустым быть не может; NOT NULL сам по себе допускает ''",
   fe_table_view=N, fe_input_type="textarea", fe_required="True",
   fe_validations="required; непустая строка",
-  comments="Товары в текст абзаца НЕ дублируются — перечень рендерится из notification_items, иначе текст и таблица бланка разойдутся (см. notification.html).",
-  api_get_index=N, api_get_single=Y, api_create=Y, api_update=N)
+  comments="Товары в текст абзаца НЕ дублируются — перечень рендерится из notification_items, иначе текст и таблица бланка разойдутся (см. notification.html). ОВ-11: update=Y — текст правится и в черновике, и в работе (SV-10).",
+  api_get_index=N, api_get_single=Y, api_create=Y, api_update=Y)
 A("notifications", "division_name", doc=D + " · бланк BILDIRISHNOMA", label="Наименование подразделения", new_type="varchar(255)",
   description="«Bo‘linma nomi» бланка — подразделение-инициатор потребности.",
   be_type="String(255)", be_nullable="False",
   be_other="CHECK (length(trim(division_name)) > 0)",
   fe_table_view=N, fe_input_type="text", fe_required="True", fe_max="255",
   fe_validations="required; trim; 1..255",
-  comments="СВОБОДНЫЙ ТЕКСТ, не справочник и не FK на warehouses (решение заказчика 17.07.2026, пересмотру не подлежит). Подразделение и склад назначения — разные сущности: склад отвечает на «куда придёт товар», подразделение — «кто просит». Отдельной таблицы нет — 22 таблицы остаются 22.",
-  api_get_index=N, api_get_single=Y, api_create=Y, api_update=N)
+  comments="СВОБОДНЫЙ ТЕКСТ, не справочник и не FK на warehouses (решение заказчика 17.07.2026, пересмотру не подлежит). Подразделение и склад назначения — разные сущности: склад отвечает на «куда придёт товар», подразделение — «кто просит». Отдельной таблицы нет — 22 таблицы остаются 22. ОВ-11: update=Y — текст правится и в черновике, и в работе (SV-10).",
+  api_get_index=N, api_get_single=Y, api_create=Y, api_update=Y)
 A("notifications", "pdf_url", doc=D + " · бланк BILDIRISHNOMA", label="PDF бланка", new_type="varchar(500) NULL",
   description="Ключ объекта в MinIO (бакет documents) — снимок напечатанного бланка. Отдаётся presigned URL с TTL 5 мин.",
   be_type="String(500)", be_nullable="True", be_editable="False",
@@ -373,15 +375,16 @@ A("notification_items", "product_id", doc=D, label="Товар", new_type="bigin
   fe_table_view=Y, fe_input_type="select", fe_required="True",
   fe_choice_model="GET /products?status=active",
   fe_validations="required; товар не должен повторяться в строках одного уведомления",
-  api_get_index=N, api_get_single=Y, api_create=Y, api_update=N)
+  comments="ОВ-11: update=Y — строки правятся диффом по product_id (add/remove/смена товара). В черновике свободно; в работе удаление строки с приобретениями блокирует сервис (SV-10/SV-11).",
+  api_get_index=N, api_get_single=Y, api_create=Y, api_update=Y)
 A("notification_items", "qty_requested", doc=D, label="Заявлено", new_type="numeric(14,3)",
   description="Заявленное количество. Дробное (кг, л). Потолок для контроля перезакупки (SV-1).",
   be_type="Numeric(14, 3)", be_nullable="False",
   be_other="INV-6: CHECK (qty_requested > 0)",
   fe_table_view=Y, fe_input_type="number", fe_required="True",
   fe_validations="required; > 0; до 3 знаков после запятой; ЕИ показывается из products.unit_id",
-  comments="qty_purchased и «остаток к приобретению» НЕ хранятся — считаются из acquisition_items (ТЗ §3).",
-  api_get_index=N, api_get_single=Y, api_create=Y, api_update=N)
+  comments="qty_purchased и «остаток к приобретению» НЕ хранятся — считаются из acquisition_items (ТЗ §3). ОВ-11: update=Y — в черновике меняется свободно; в работе увеличение свободно, уменьшение ниже приобретённого блокирует сервис (SV-10).",
+  api_get_index=N, api_get_single=Y, api_create=Y, api_update=Y)
 
 D = "ТЗ §3 М2 acquisitions"
 pk("acquisitions", D)

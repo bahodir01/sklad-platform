@@ -10,8 +10,11 @@
   notifications      id  number date author_id warehouse_id status  → List
                      + comment body_text division_name pdf_url created_at → Read
                      create: date, warehouse_id, comment, body_text, division_name
-                     update: — (нет ни одного update=true → схемы Update нет)
+                     update: date, warehouse_id, comment, body_text, division_name
+                             (максимальный набор — уровень черновика; SV-10
+                             статус-специфику enforce'ит сервис, не схема)
   notification_items create: product_id, qty_requested
+                     update: product_id, qty_requested
                      read:   id, notification_id, product_id, qty_requested
   acquisitions       read:   id number date notification_id warehouse_id supplier author_id
                      create: date, notification_id, warehouse_id, supplier
@@ -34,6 +37,18 @@ from app.shared.enums import NotificationStatus
 
 
 class NotificationItemCreate(BaseModel):
+    product_id: int
+    qty_requested: Decimal = Field(gt=0, description="Заявлено, > 0 (INV-6)")
+
+
+class NotificationItemUpdate(BaseModel):
+    """Строка желаемого состояния при PATCH (SV-10).
+
+    Ключ строки — product_id (UNIQUE(notification_id, product_id) в схеме):
+    отсюда add/remove/изменение qty вычисляются диффом по product_id, а не по
+    суррогатному id. `id` строки клиент не присылает (api.update=false).
+    """
+
     product_id: int
     qty_requested: Decimal = Field(gt=0, description="Заявлено, > 0 (INV-6)")
 
@@ -69,6 +84,32 @@ class NotificationCreate(BaseModel):
     division_name: str = Field(min_length=1, max_length=255, description="Bo‘linma nomi")
     comment: str | None = Field(default=None, description="Ehtiyojning asoslanishi")
     items: list[NotificationItemCreate] = Field(min_length=1)
+
+
+class NotificationUpdate(BaseModel):
+    """PATCH-полезная нагрузка уведомления (SV-10).
+
+    Все поля опциональны — это partial update: тронуто только то, что клиент
+    прислал (различаем через `model_fields_set`). Схема несёт МАКСИМАЛЬНЫЙ набор
+    (уровень черновика); что именно позволено в каждом статусе, решает сервис:
+      * черновик  — можно всё;
+      * в работе  — только тексты + аддитивные правки строк (нельзя менять
+                    date/warehouse_id, уменьшать qty ниже приобретённого,
+                    удалять строки с приобретениями);
+      * закрыт    — ничего.
+
+    `items`, если прислан, — ЖЕЛАЕМОЕ ПОЛНОЕ состояние строк (диффится по
+    product_id). `None`/отсутствие поля означает «строки не трогать».
+    """
+
+    __contract_extra_fields__ = {"items"}
+
+    date: dt.date | None = None
+    warehouse_id: int | None = None
+    body_text: str | None = Field(default=None, min_length=1)
+    division_name: str | None = Field(default=None, min_length=1, max_length=255)
+    comment: str | None = None
+    items: list[NotificationItemUpdate] | None = None
 
 
 class NotificationList(BaseModel):

@@ -38,6 +38,10 @@ async def _seed_stock(qty: str, *, warehouse_id: int = c.WAREHOUSE_ISS) -> None:
             ),
         )
         nid = notif.id
+    # ОВ-11: приобретать можно только против уведомления «в работе» —
+    # сначала завсклад отправляет черновик в работу (submit).
+    async with SessionLocal() as s:
+        await DocumentsService(s).submit_notification(nid)
     async with SessionLocal() as s:
         await DocumentsService(s).create_acquisition(
             author_id=c.ADMIN_ID,
