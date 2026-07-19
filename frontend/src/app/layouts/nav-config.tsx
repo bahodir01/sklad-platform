@@ -12,10 +12,19 @@ import {
   Warehouse,
   PackageMinus,
   Coins,
+  Network,
   type LucideIcon,
 } from "lucide-react";
 import type { UserRole } from "@/shared/api/model-types";
 import { ROUTES } from "@/shared/config/routes";
+
+/**
+ * URL графа codebase-memory (родной UI индексатора). Настраивается через
+ * VITE_CODEBASE_GRAPH_URL; дефолт — локальный dev-порт индексатора. В проде,
+ * если сервис не поднят, пункт можно скрыть, задав пустую строку.
+ */
+export const CODEBASE_GRAPH_URL: string =
+  import.meta.env.VITE_CODEBASE_GRAPH_URL ?? "http://localhost:9749";
 
 export interface NavItem {
   label: string;
@@ -25,6 +34,8 @@ export interface NavItem {
   roles?: UserRole[];
   /** Динамический бейдж-счётчик. 'toPrint' — очередь печати (admin, AP-3). */
   badgeKey?: "toPrint";
+  /** Внешняя ссылка (открывается в новой вкладке), а не роут приложения. */
+  external?: boolean;
 }
 
 export interface NavSection {
@@ -73,6 +84,18 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Склады", to: ROUTES.warehouses, icon: Warehouse },
       { label: "Типы расхода товара", to: ROUTES.expenseTypes, icon: PackageMinus },
       { label: "Виды расхода денег", to: ROUTES.expenseCategories, icon: Coins },
+    ],
+  },
+  {
+    title: "Разработка",
+    items: [
+      {
+        label: "Граф кодовой базы",
+        to: CODEBASE_GRAPH_URL,
+        icon: Network,
+        roles: ["admin"],
+        external: true,
+      },
     ],
   },
 ];

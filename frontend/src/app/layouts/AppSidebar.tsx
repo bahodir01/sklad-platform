@@ -59,21 +59,9 @@ export function AppSidebar({ collapsed }: { collapsed: boolean }) {
               {items.map((item) => {
                 const Icon = item.icon;
                 const badge = badgeFor(item);
-                return (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    title={collapsed ? item.label : undefined}
-                    className={({ isActive }) =>
-                      cn(
-                        "mb-0.5 flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] font-medium transition-colors",
-                        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                        isActive
-                          ? "bg-brand-soft text-brand-text"
-                          : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                      )
-                    }
-                  >
+
+                const inner = (
+                  <>
                     <Icon className="h-4 w-4 flex-none opacity-90" aria-hidden="true" />
                     {!collapsed && <span className="truncate">{item.label}</span>}
                     {!collapsed && badge != null && badge > 0 && (
@@ -84,6 +72,44 @@ export function AppSidebar({ collapsed }: { collapsed: boolean }) {
                         {badge}
                       </span>
                     )}
+                  </>
+                );
+
+                const baseClass =
+                  "mb-0.5 flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] font-medium transition-colors " +
+                  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring " +
+                  "text-muted-foreground hover:bg-accent hover:text-foreground";
+
+                // Внешняя ссылка (граф codebase) — обычный <a> в новую вкладку,
+                // не роут приложения: react-router о ней ничего не знает.
+                if (item.external) {
+                  return (
+                    <a
+                      key={item.to}
+                      href={item.to}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={collapsed ? item.label : undefined}
+                      className={baseClass}
+                    >
+                      {inner}
+                    </a>
+                  );
+                }
+
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    title={collapsed ? item.label : undefined}
+                    className={({ isActive }) =>
+                      cn(
+                        baseClass,
+                        isActive && "bg-brand-soft text-brand-text hover:bg-brand-soft hover:text-brand-text",
+                      )
+                    }
+                  >
+                    {inner}
                   </NavLink>
                 );
               })}
