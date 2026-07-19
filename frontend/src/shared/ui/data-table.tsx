@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "./table";
 import { Skeleton } from "./skeleton";
 import { Button } from "./button";
+import { Checkbox } from "./checkbox";
 
 export interface Column<T> {
   /** Ключ для React и заголовка. */
@@ -28,6 +29,16 @@ interface DataTableProps<T> {
   emptyAction?: ReactNode;
   /** Число колонок-скелетов при загрузке. */
   skeletonRows?: number;
+  /**
+   * Пакетный выбор (спека13 §5): если передано — рисуется ведущая колонка с
+   * чекбоксами и «выбрать всё» в шапке. Управляется извне (selectedKeys — Set
+   * ключей строк). Без этих пропсов таблица ведёт себя как раньше.
+   */
+  selectedKeys?: Set<string | number>;
+  onToggleRow?: (row: T) => void;
+  onToggleAll?: (checked: boolean) => void;
+  /** Строку нельзя выбрать (напр. не в нужном статусе) — чекбокс disabled. */
+  isRowSelectable?: (row: T) => boolean;
 }
 
 /**
@@ -46,14 +57,42 @@ export function DataTable<T>({
   emptyText = "Записей нет",
   emptyAction,
   skeletonRows = 6,
+  selectedKeys,
+  onToggleRow,
+  onToggleAll,
+  isRowSelectable,
 }: DataTableProps<T>) {
-  const colCount = columns.length + (rowActions ? 1 : 0);
+  const selectable = selectedKeys !== undefined;
+  const colCount = columns.length + (rowActions ? 1 : 0) + (selectable ? 1 : 0);
+
+  const selectableRows = selectable
+    ? rows.filter((r) => (isRowSelectable ? isRowSelectable(r) : true))
+    : [];
+  const selectedCount = selectable
+    ? selectableRows.filter((r) => selectedKeys!.has(rowKey(r))).length
+    : 0;
+  const allChecked: boolean | "indeterminate" =
+    selectableRows.length > 0 && selectedCount === selectableRows.length
+      ? true
+      : selectedCount > 0
+        ? "indeterminate"
+        : false;
 
   return (
     <Table>
       <TableCaption className="sr-only">{caption}</TableCaption>
       <TableHeader>
         <TableRow>
+          {selectable ? (
+            <TableHead className="w-10">
+              <Checkbox
+                checked={allChecked}
+                onCheckedChange={(v) => onToggleAll?.(v === true)}
+                disabled={selectableRows.length === 0}
+                aria-label="Выбрать все строки"
+              />
+            </TableHead>
+          ) : null}
           {columns.map((col) => (
             <TableHead key={col.key} className={col.align === "right" ? "text-right" : undefined}>
               {col.header}
@@ -98,8 +137,20 @@ export function DataTable<T>({
             </TableCell>
           </TableRow>
         ) : (
-          rows.map((row) => (
+          rows.map((row) => {
+            const canSelect = isRowSelectable ? isRowSelectable(row) : true;
+            return (
             <TableRow key={rowKey(row)}>
+              {selectable ? (
+                <TableCell className="w-10">
+                  <Checkbox
+                    checked={selectedKeys!.has(rowKey(row))}
+                    onCheckedChange={() => onToggleRow?.(row)}
+                    disabled={!canSelect}
+                    aria-label="Выбрать строку"
+                  />
+                </TableCell>
+              ) : null}
               {columns.map((col) => (
                 <TableCell
                   key={col.key}
@@ -114,7 +165,8 @@ export function DataTable<T>({
                 </TableCell>
               ) : null}
             </TableRow>
-          ))
+            );
+          })
         )}
       </TableBody>
     </Table>

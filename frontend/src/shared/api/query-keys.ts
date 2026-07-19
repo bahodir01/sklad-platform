@@ -49,6 +49,10 @@ export const cashKeys = {
   all: ["cash"] as const,
   desks: ["cash", "desks"] as const,
   myExpenses: (params: Record<string, unknown>) => ["cash", "expenses", "my", params] as const,
+  // Спека13 §5: передача расходов в бухгалтерию (admin).
+  expenses: (params: Record<string, unknown>) => ["cash", "expenses", "list", params] as const,
+  expensesRegistry: (params: Record<string, unknown>) =>
+    ["cash", "expenses", "registry", params] as const,
 };
 
 // ── М3 Остатки / движения (§10) ─────────────────────────────────────

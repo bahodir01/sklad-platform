@@ -9,9 +9,10 @@ import { usePageParams } from "@/shared/lib/use-page-params";
 import { formatDate, formatDateTime } from "@/shared/lib/format";
 
 /**
- * Реестр выданных (М4, admin, §6.4/ADR-2a). Оба номера: заявки и проводки —
+ * Реестр передачи в бухгалтерию (М4, admin, спека13 §4/ADR-2a). Только
+ * переданные заявки (status=submitted). Оба номера: заявки и проводки —
  * бухгалтерия держит бумагу с номером ЗАЯВКИ, в учёте списание под номером
- * ПРОВОДКИ.
+ * ПРОВОДКИ; плюс общий номер реестра передачи.
  */
 export function RegistryPage() {
   const { page, size, setPage } = usePageParams();
@@ -43,26 +44,31 @@ export function RegistryPage() {
     },
     { key: "warehouse", header: "Склад", render: (r) => wh.name(r.warehouse_id) },
     { key: "issued_at", header: "Выдано", render: (r) => formatDateTime(r.issued_at) },
-    { key: "writeoff_date", header: "Дата проводки", render: (r) => formatDate(r.writeoff_date) },
+    {
+      key: "register_no",
+      header: "№ реестра",
+      render: (r) => <span className="font-mono text-[12.5px]">{r.submitted_register_no ?? "—"}</span>,
+    },
+    { key: "submitted_at", header: "Передано", render: (r) => formatDate(r.submitted_at) },
   ];
 
   return (
     <section>
       <PageHeader
-        breadcrumb="Документы › Реестр выданных"
-        title="Реестр выданных"
-        subtitle="Выданные заявки с номерами заявки и складской проводки"
+        breadcrumb="Документы › Реестр передачи"
+        title="Реестр передачи"
+        subtitle="Переданные в бухгалтерию заявки с номерами заявки, проводки и реестра"
       />
       <div className="rounded-lg border">
         <DataTable
-          caption="Реестр выданных документов"
+          caption="Реестр передачи в бухгалтерию"
           columns={columns}
           rows={data?.items ?? []}
           rowKey={(r) => r.request_id}
           isLoading={query.isLoading}
           isError={query.isError}
           onRetry={() => query.refetch()}
-          emptyText="Выданных заявок пока нет"
+          emptyText="Переданных заявок пока нет"
         />
       </div>
       {data ? (

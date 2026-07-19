@@ -12,6 +12,7 @@ import {
   Warehouse,
   PackageMinus,
   Coins,
+  Send,
   Network,
   type LucideIcon,
 } from "lucide-react";
@@ -53,8 +54,8 @@ export interface NavSection {
 export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
-      { label: "К печати", to: ROUTES.toPrint, icon: Printer, roles: ["admin"], badgeKey: "toPrint" },
-      { label: "Реестр выданных", to: ROUTES.registry, icon: ClipboardList, roles: ["admin"] },
+      { label: "Выдачи товара", to: ROUTES.toPrint, icon: Printer, roles: ["admin"], badgeKey: "toPrint" },
+      { label: "Реестр передачи", to: ROUTES.registry, icon: ClipboardList, roles: ["admin"] },
       { label: "Мои заявки", to: ROUTES.myRequests, icon: FileText, roles: ["teacher", "worker"] },
       { label: "Мои расходы", to: ROUTES.myExpenses, icon: Wallet, roles: ["teacher", "worker"] },
     ],
@@ -70,7 +71,10 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     title: "Деньги",
-    items: [{ label: "Кассы", to: ROUTES.cash, icon: Coins, roles: ["admin"] }],
+    items: [
+      { label: "Кассы", to: ROUTES.cash, icon: Coins, roles: ["admin"] },
+      { label: "Передача расходов", to: ROUTES.cashExpenses, icon: Send, roles: ["admin"] },
+    ],
   },
   {
     title: "Отчёты",

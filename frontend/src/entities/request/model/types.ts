@@ -10,4 +10,9 @@ export type RequestCount = components["schemas"]["RequestCount"];
 export type IssueResult = components["schemas"]["IssueResult"];
 export type RegistryRow = components["schemas"]["RegistryRow"];
 export type BatchPrintResult = components["schemas"]["BatchPrintResult"];
+export type MarkSignedResult = components["schemas"]["MarkSignedResult"];
+export type SubmitResult = components["schemas"]["SubmitResult"];
 export type WriteoffRead = components["schemas"]["WriteoffRead"];
+
+/** Статусы фильтр-карточек экрана «Выдачи товара» (спека13 §5). */
+export type RequestQueueStatus = "to_issue" | "issued" | "signed" | "submitted";

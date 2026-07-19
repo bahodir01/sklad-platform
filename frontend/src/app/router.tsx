@@ -18,6 +18,7 @@ import { AcquisitionsPage } from "@/pages/documents/AcquisitionsPage";
 import { TransfersPage } from "@/pages/documents/TransfersPage";
 import { WriteoffsPage } from "@/pages/documents/WriteoffsPage";
 import { CashPage } from "@/pages/cash/CashPage";
+import { CashExpensesPage } from "@/pages/cash/CashExpensesPage";
 import { MyExpensesPage } from "@/pages/cash/MyExpensesPage";
 import { ReportsPage } from "@/pages/reports/ReportsPage";
 import { ForbiddenPage } from "@/pages/errors/ForbiddenPage";
@@ -72,6 +73,7 @@ export const router = createBrowserRouter([
               { path: ROUTES.transfers, element: <TransfersPage /> },
               { path: ROUTES.writeoffs, element: <WriteoffsPage /> },
               { path: ROUTES.cash, element: <CashPage /> },
+              { path: ROUTES.cashExpenses, element: <CashExpensesPage /> },
               { path: ROUTES.reports, element: <ReportsPage /> },
             ],
           },

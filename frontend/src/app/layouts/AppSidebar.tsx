@@ -14,7 +14,8 @@ export function AppSidebar({ collapsed }: { collapsed: boolean }) {
   const { data: me } = useMe();
   const role = me?.role;
   const isAdmin = role === "admin";
-  const toPrintCount = useRequestsCount(isAdmin).data?.count ?? 0;
+  // Бейдж «Выдачи товара» = число заявок, ждущих выдачи (спека13 §5).
+  const toPrintCount = useRequestsCount("to_issue", isAdmin).data?.count ?? 0;
 
   const visible = (item: NavItem): boolean =>
     item.roles === undefined || (role != null && item.roles.includes(role));

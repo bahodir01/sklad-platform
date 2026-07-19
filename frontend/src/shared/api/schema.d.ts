@@ -409,7 +409,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Очередь «К печати» (admin, AP-2) */
+        /** Заявки по статусу (спека13 §5, admin) */
         get: operations["list_requests_api_v1_requests_get"];
         put?: never;
         /** Создать заявку (черновик; teacher/worker) */
@@ -429,7 +429,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Подтвердить заявку (draft→to_print; только владелец) */
+        /** Подтвердить заявку (draft→to_issue; только владелец) */
         post: operations["confirm_request_api_v1_requests__id__confirm_post"];
         delete?: never;
         options?: never;
@@ -461,7 +461,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Счётчик очереди «К печати» (бейдж, AP-3) */
+        /** Счётчик фильтр-карточки (спека13 §5: К выдаче/К подписи/Подписано/Передано) */
         get: operations["requests_count_api_v1_requests_count_get"];
         put?: never;
         post?: never;
@@ -478,7 +478,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Реестр выданных: ОБА номера — заявки и проводки (§6.4, ADR-2a) */
+        /** Реестр передачи в бухгалтерию: ОБА номера + № реестра (спека13 §4) */
         get: operations["requests_registry_api_v1_requests_registry_get"];
         put?: never;
         post?: never;
@@ -497,7 +497,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Пакетная печать очереди (§6.3) */
+        /** Печать пачкой: создать пачку + один PDF по сотрудникам (спека13 §3) */
         post: operations["batch_print_api_v1_requests_batch_print_post"];
         delete?: never;
         options?: never;
@@ -505,7 +505,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/requests/{id}/print": {
+    "/api/v1/requests/mark-signed": {
         parameters: {
             query?: never;
             header?: never;
@@ -514,8 +514,42 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Отметить напечатанной (to_print→printed, admin, ОВ-3) */
-        post: operations["print_request_api_v1_requests__id__print_post"];
+        /** Отметить подписано пачкой (issued→signed, исключения; спека13 §3) */
+        post: operations["mark_signed_api_v1_requests_mark_signed_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/requests/submit-to-accounting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Передать в бухгалтерию пачкой (signed→submitted, № реестра; спека13 §4) */
+        post: operations["submit_to_accounting_api_v1_requests_submit_to_accounting_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/requests/batches/{id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** PDF пачки подписи (один документ по сотрудникам, спека13 §3) */
+        get: operations["batch_pdf_api_v1_requests_batches__id__pdf_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -532,14 +566,13 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Выдать товар: проводка + списание (printed→issued, admin)
-         * @description POST /requests/{id}/issue — необратимая выдача (§5.3).
+         * Выдать товар: проводка + СПИСАНИЕ (to_issue→issued, admin; спека13 §2)
+         * @description POST /requests/{id}/issue — необратимая выдача со списанием (спека13 §1-§2).
          *
-         *     Идемпотентность (архитектура §6): при наличии Idempotency-Key ретрай сети /
-         *     двойной клик по «Выдано» отсекается через Redis ДО входа в транзакцию. Если
-         *     Redis недоступен — гарантию единственного списания даёт условие
-         *     `WHERE status='printed'` внутри UPDATE (SV-5): второй issue() получит
-         *     rowcount=0 и Conflict. Redis лишь экономит поход в БД на явном ретрае.
+         *     Идемпотентность: при наличии Idempotency-Key ретрай сети / двойной клик по
+         *     «Выдать» отсекается через Redis ДО входа в транзакцию. Если Redis недоступен —
+         *     гарантию единственного списания даёт условие `WHERE status='to_issue'` внутри
+         *     UPDATE (SV-5): второй issue() получит rowcount=0 и Conflict.
          */
         post: operations["issue_request_api_v1_requests__id__issue_post"];
         delete?: never;
@@ -557,14 +590,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Прямое списание порча/брак БЕЗ заявки (admin, §4.4)
-         * @description POST /writeoffs — только порча/брак (requires_employee=false). Выдача
-         *     (requires_employee=true) отклоняется: она создаётся через issue() (этап 3).
-         *
-         *     author_id — сервер из current_user; number/requires_employee — сервер.
-         *     Списывает немедленно через ledger.post(−qty), без статусов и печати.
-         */
+        /** Прямое списание порча/брак БЕЗ заявки (admin, §4.4) */
         post: operations["create_writeoff_api_v1_writeoffs_post"];
         delete?: never;
         options?: never;
@@ -579,7 +605,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** PDF бланка расхода (номер ЗАЯВКИ, ADR-2a; перепечатка безопасна) */
+        /** PDF бланка расхода одной заявки (номер ЗАЯВКИ, ADR-2a; перепечать копии) */
         get: operations["request_pdf_api_v1_requests__id__pdf_get"];
         put?: never;
         post?: never;
@@ -640,7 +666,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/cash/expenses": {
+    "/api/v1/cash/expenses/registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Реестр передачи денег в бухгалтерию (admin, спека13 §4) */
+        get: operations["expenses_registry_api_v1_cash_expenses_registry_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cash/expenses/submit-to-accounting": {
         parameters: {
             query?: never;
             header?: never;
@@ -648,6 +691,24 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
+        put?: never;
+        /** Передать расходы в бухгалтерию пачкой (admin, № реестра; спека13 §4) */
+        post: operations["submit_expenses_to_accounting_api_v1_cash_expenses_submit_to_accounting_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cash/expenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Расходы денег, фильтр «Передано/Не передано» (admin, спека13 §4) */
+        get: operations["list_expenses_api_v1_cash_expenses_get"];
         put?: never;
         /**
          * Провести расход денег с чеком (teacher/worker, §5.4)
@@ -968,18 +1029,15 @@ export interface components {
             count: number;
         };
         /**
-         * BatchPrintRequest
-         * @description POST /requests/batch-print: пакетная печать очереди (§6.3).
+         * BatchPrintResult
+         * @description Ответ POST /requests/batch-print (спека13 §3): создана пачка, один PDF по
+         *     сотрудникам. Статус заявок НЕ меняется — печать лишь группирует и печатает.
          */
-        BatchPrintRequest: {
-            /**
-             * Ids
-             * @description Идентификаторы заявок
-             */
-            ids: number[];
-        };
-        /** BatchPrintResult */
         BatchPrintResult: {
+            /** Batch Id */
+            batch_id: number;
+            /** Batch Number */
+            batch_number: string;
             /**
              * Printed
              * @default []
@@ -990,6 +1048,11 @@ export interface components {
              * @default []
              */
             skipped: number[];
+            /**
+             * Rendered Pdf
+             * @default false
+             */
+            rendered_pdf: boolean;
         };
         /** Body_create_expense_api_v1_cash_expenses_post */
         Body_create_expense_api_v1_cash_expenses_post: {
@@ -1065,6 +1128,63 @@ export interface components {
             name?: string | null;
             status?: components["schemas"]["CatalogStatus"] | null;
         };
+        /**
+         * ExpenseRegistryRow
+         * @description Строка реестра передачи денег (спека13 §4): доказательство передачи.
+         */
+        ExpenseRegistryRow: {
+            /** Id */
+            id: number;
+            /** Employee Id */
+            employee_id: number;
+            /** Expense Category Id */
+            expense_category_id: number;
+            /** Amount */
+            amount: string;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Description */
+            description: string;
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Submitted Register No */
+            submitted_register_no: string | null;
+        };
+        /**
+         * ExpenseSubmitRequest
+         * @description POST /cash/expenses/submit-to-accounting (спека13 §4): список расходов.
+         *
+         *     У денег НЕТ этапа подписи — чек заменяет подпись, расход готов к передаче
+         *     сразу после проведения. Исключённые (снятая галочка) в список не попадают.
+         */
+        ExpenseSubmitRequest: {
+            /**
+             * Ids
+             * @description Идентификаторы расходов
+             */
+            ids: number[];
+        };
+        /**
+         * ExpenseSubmitResult
+         * @description Ответ передачи расходов: общий submitted_register_no на весь вызов.
+         */
+        ExpenseSubmitResult: {
+            /** Register No */
+            register_no?: string | null;
+            /**
+             * Submitted
+             * @default []
+             */
+            submitted: number[];
+            /**
+             * Skipped
+             * @default []
+             */
+            skipped: number[];
+        };
         /** ExpenseTypeCreate */
         ExpenseTypeCreate: {
             /**
@@ -1131,8 +1251,22 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * IdListRequest
+         * @description Тело bulk-действий (спека13 §3/§4): список id, работа с исключениями.
+         *
+         *     Клиент присылает id, которые ДЕЙСТВИТЕЛЬНО обрабатываются (напр. подписанные);
+         *     исключённые (снятая галочка) просто не попадают в список — сервер их не трогает.
+         */
+        IdListRequest: {
+            /**
+             * Ids
+             * @description Идентификаторы заявок
+             */
+            ids: number[];
+        };
+        /**
          * IssueResult
-         * @description Ответ POST /requests/{id}/issue: заявка + рождённая проводка.
+         * @description Ответ POST /requests/{id}/issue: заявка + рождённая проводка (спека13 §2).
          */
         IssueResult: {
             request: components["schemas"]["RequestRead"];
@@ -1144,6 +1278,23 @@ export interface components {
             username: string;
             /** Password */
             password: string;
+        };
+        /**
+         * MarkSignedResult
+         * @description Ответ POST /requests/mark-signed (спека13 §3): issued → signed, исключения
+         *     остаются issued.
+         */
+        MarkSignedResult: {
+            /**
+             * Signed
+             * @default []
+             */
+            signed: number[];
+            /**
+             * Skipped
+             * @default []
+             */
+            skipped: number[];
         };
         /**
          * MoneyExpenseList
@@ -1165,6 +1316,10 @@ export interface components {
              * Format: date
              */
             date: string;
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Submitted Register No */
+            submitted_register_no: string | null;
         };
         /** MoneyExpenseRead */
         MoneyExpenseRead: {
@@ -1187,6 +1342,10 @@ export interface components {
              * Format: date
              */
             date: string;
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Submitted Register No */
+            submitted_register_no: string | null;
         };
         /**
          * MoneyIncomeCreate
@@ -1421,6 +1580,19 @@ export interface components {
             /** Pages */
             pages: number;
         };
+        /** Page[ExpenseRegistryRow] */
+        Page_ExpenseRegistryRow_: {
+            /** Items */
+            items: components["schemas"]["ExpenseRegistryRow"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Size */
+            size: number;
+            /** Pages */
+            pages: number;
+        };
         /** Page[ExpenseTypeList] */
         Page_ExpenseTypeList_: {
             /** Items */
@@ -1584,7 +1756,8 @@ export interface components {
         };
         /**
          * RegistryRow
-         * @description Строка реестра выданных документов (§6.4, ADR-2a): ОБА номера.
+         * @description Строка реестра ПЕРЕДАЧИ в бухгалтерию (спека13 §4, ADR-2a): ОБА номера +
+         *     номер реестра передачи. Доказательство передачи — бухгалтерия расписывается.
          *
          *     Поиск работает по любому из номеров — бухгалтерия держит на руках бумагу с
          *     номером ЗАЯВКИ (проводки на момент печати ещё не существовало), а в учёте
@@ -1613,10 +1786,14 @@ export interface components {
              * Format: date
              */
             writeoff_date: string;
+            /** Submitted At */
+            submitted_at?: string | null;
+            /** Submitted Register No */
+            submitted_register_no?: string | null;
         };
         /**
          * RequestCount
-         * @description Бейдж-счётчик очереди «К печати» (AP-3).
+         * @description Бейдж-счётчик фильтр-карточки экрана «Выдачи товара» (спека13 §5).
          */
         RequestCount: {
             /** Count */
@@ -1694,6 +1871,12 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Batch Id */
+            batch_id: number | null;
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Submitted Register No */
+            submitted_register_no: string | null;
         };
         /** RequestRead */
         RequestRead: {
@@ -1724,6 +1907,12 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Batch Id */
+            batch_id: number | null;
+            /** Submitted At */
+            submitted_at: string | null;
+            /** Submitted Register No */
+            submitted_register_no: string | null;
             /**
              * Items
              * @default []
@@ -1733,9 +1922,15 @@ export interface components {
         /**
          * RequestStatus
          * @description Статусы принадлежат ЗАЯВКЕ, а не проводке (ADR-2).
+         *
+         *     Фича 13 (пакетная подпись, спека §2) расцепила выдачу и подпись:
+         *         draft → to_issue → issued → signed → submitted
+         *     Списание со склада — на переходе to_issue → issued (было printed → issued).
+         *     Старые значения to_print/printed убраны; их данные мигрируют в to_issue
+         *     (миграция 0002, data migration).
          * @enum {string}
          */
-        RequestStatus: "draft" | "to_print" | "printed" | "issued";
+        RequestStatus: "draft" | "to_issue" | "issued" | "signed" | "submitted";
         /** StockBalanceList */
         StockBalanceList: {
             /** Id */
@@ -1765,6 +1960,25 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * SubmitResult
+         * @description Ответ POST /requests/submit-to-accounting (спека13 §4): signed → submitted,
+         *     общий submitted_register_no на весь вызов.
+         */
+        SubmitResult: {
+            /** Register No */
+            register_no?: string | null;
+            /**
+             * Submitted
+             * @default []
+             */
+            submitted: number[];
+            /**
+             * Skipped
+             * @default []
+             */
+            skipped: number[];
         };
         /**
          * TokenResponse
@@ -3390,6 +3604,10 @@ export interface operations {
     requests_registry_api_v1_requests_registry_get: {
         parameters: {
             query?: {
+                /** @description Номер реестра передачи */
+                register_no?: string | null;
+                /** @description Дата передачи YYYY-MM-DD */
+                date?: string | null;
                 /** @description Номер страницы, с 1 */
                 page?: number;
                 size?: number;
@@ -3429,7 +3647,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BatchPrintRequest"];
+                "application/json": components["schemas"]["IdListRequest"];
             };
         };
         responses: {
@@ -3453,12 +3671,78 @@ export interface operations {
             };
         };
     };
-    print_request_api_v1_requests__id__print_post: {
+    mark_signed_api_v1_requests_mark_signed_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdListRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkSignedResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_to_accounting_api_v1_requests_submit_to_accounting_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdListRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_pdf_api_v1_requests_batches__id__pdf_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description Идентификатор заявки */
+                /** @description Идентификатор пачки подписи */
                 id: number;
             };
             cookie?: never;
@@ -3471,7 +3755,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RequestRead"];
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -3640,6 +3924,111 @@ export interface operations {
     my_expenses_api_v1_cash_expenses_my_get: {
         parameters: {
             query?: {
+                /** @description Номер страницы, с 1 */
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_MoneyExpenseList_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    expenses_registry_api_v1_cash_expenses_registry_get: {
+        parameters: {
+            query?: {
+                /** @description Номер реестра передачи */
+                register_no?: string | null;
+                /** @description Дата передачи YYYY-MM-DD */
+                date?: string | null;
+                /** @description Номер страницы, с 1 */
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ExpenseRegistryRow_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_expenses_to_accounting_api_v1_cash_expenses_submit_to_accounting_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseSubmitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseSubmitResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_expenses_api_v1_cash_expenses_get: {
+        parameters: {
+            query?: {
+                /** @description true=переданные, false=нет */
+                submitted?: boolean | null;
                 /** @description Номер страницы, с 1 */
                 page?: number;
                 size?: number;

@@ -2,7 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/shared/api/client";
 import { requestKeys } from "@/shared/api/query-keys";
 import type { Page } from "@/shared/api/types";
-import type { RequestCount, RequestListItem, RegistryRow } from "../model/types";
+import type {
+  RequestCount,
+  RequestListItem,
+  RegistryRow,
+  RequestQueueStatus,
+} from "../model/types";
 
 /** Мои заявки: GET /requests/my (teacher/worker, row-level §1.3). */
 export function useMyRequests(params: { page: number; size: number }) {
@@ -14,13 +19,12 @@ export function useMyRequests(params: { page: number; size: number }) {
 }
 
 /**
- * Заявки по статусу: GET /requests?status=... (admin, AP-2). Очередь печати
- * рисуется из двух наборов — to_print (кнопка «Печать») и printed (кнопка
- * «Выдано»): статичный GET /requests/{id} на бэке отсутствует, состав строк в
- * списке не отдаётся (RequestList без items) — см. отчёт, вопрос Q-2.
+ * Заявки по статусу: GET /requests?status=... (admin, спека13 §5). Экран
+ * «Выдачи товара» — журнал-трекер по 4 фильтрам: to_issue → issued → signed →
+ * submitted. Каждый статус — свой набор строк и свои действия.
  */
 export function useRequestsByStatus(
-  status: "to_print" | "printed" | "issued" | "draft",
+  status: RequestQueueStatus,
   params: { page: number; size: number },
   enabled = true,
 ) {
@@ -32,21 +36,32 @@ export function useRequestsByStatus(
   });
 }
 
-/** Счётчик очереди «К печати» для бейджа (AP-3), refetch каждые 30с. */
-export function useRequestsCount(enabled: boolean) {
+/**
+ * Счётчик заявок в статусе: GET /requests/count?status=... (спека13 §5).
+ * Кормит и бейдж в навигации, и карточки-фильтры экрана «Выдачи товара».
+ */
+export function useRequestsCount(status: RequestQueueStatus, enabled = true) {
   return useQuery<RequestCount>({
-    queryKey: requestKeys.count("to_print"),
-    queryFn: () => api.get<RequestCount>("/requests/count", { status: "to_print" }),
+    queryKey: requestKeys.count(status),
+    queryFn: () => api.get<RequestCount>("/requests/count", { status }),
     enabled,
     refetchInterval: 30_000,
   });
 }
 
-/** Реестр выданных: GET /requests/registry (оба номера, ADR-2a). */
-export function useRegistry(params: { page: number; size: number }) {
+/**
+ * Реестр ПЕРЕДАЧИ в бухгалтерию: GET /requests/registry (спека13 §4, ADR-2a).
+ * Оба номера (заявки + проводки) + номер реестра передачи. Фильтр по
+ * register_no/date — для перепечати конкретного реестра.
+ */
+export function useRegistry(
+  params: { page: number; size: number; register_no?: string; date?: string },
+  enabled = true,
+) {
   return useQuery<Page<RegistryRow>>({
     queryKey: requestKeys.registry(params),
     queryFn: () => api.get<Page<RegistryRow>>("/requests/registry", params),
     placeholderData: (prev) => prev,
+    enabled,
   });
 }

@@ -1,7 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/shared/api/client";
 import { cashKeys } from "@/shared/api/query-keys";
-import type { MoneyIncomeCreate, MoneyIncomeRead, MoneyExpenseRead } from "../model/types";
+import type {
+  ExpenseSubmitResult,
+  MoneyIncomeCreate,
+  MoneyIncomeRead,
+  MoneyExpenseRead,
+} from "../model/types";
 
 /** Приход денег: POST /cash/income (ТОЛЬКО admin, §7.2). Обновляет балансы касс. */
 export function useCreateIncome() {
@@ -45,5 +50,19 @@ export function useCreateExpense() {
       qc.invalidateQueries({ queryKey: cashKeys.desks });
       qc.invalidateQueries({ queryKey: ["reports", "cashflow"] });
     },
+  });
+}
+
+/**
+ * Передать расходы в бухгалтерию пачкой: POST
+ * /cash/expenses/submit-to-accounting (admin, спека13 §4). У денег нет этапа
+ * подписи — чек заменяет подпись. Общий submitted_register_no на весь вызов;
+ * исключённые (снятая галочка) в список не попадают.
+ */
+export function useSubmitExpenses() {
+  const qc = useQueryClient();
+  return useMutation<ExpenseSubmitResult, unknown, number[]>({
+    mutationFn: (ids) => api.post<ExpenseSubmitResult>("/cash/expenses/submit-to-accounting", { ids }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["cash", "expenses"] }),
   });
 }

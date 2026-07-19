@@ -16,8 +16,8 @@ import { formatDate } from "@/shared/lib/format";
 
 /**
  * «Мои заявки» (teacher/worker, §5.1). Список своих заявок + подтверждение
- * черновика (draft→to_print): после подтверждения заявка уходит в очередь
- * печати к администратору.
+ * черновика (draft→to_issue, спека13 §2): после подтверждения заявка уходит к
+ * администратору на выдачу со склада.
  */
 export function MyRequestsPage() {
   const { page, size, setPage } = usePageParams();
@@ -28,7 +28,7 @@ export function MyRequestsPage() {
 
   function handleConfirm(id: number, number: string) {
     confirm.mutate(id, {
-      onSuccess: () => toast.success(`Заявка ${number} подтверждена и отправлена на печать`),
+      onSuccess: () => toast.success(`Заявка ${number} подтверждена и передана на выдачу`),
       onError: (e) => toast.error(e instanceof ApiError ? e.message : "Не удалось подтвердить"),
     });
   }
