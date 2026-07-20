@@ -111,7 +111,7 @@ class AuthService:
         access_token, expires_in = create_access_token(user)
         jti = self._store.new_jti()
         refresh_token, _ = create_refresh_token(user.id, family_id=family_id, jti=jti)
-        await self._store.register(jti=jti, family_id=family_id)
+        await self._store.register(jti=jti, family_id=family_id, user_id=user.id)
         return TokenPair(
             access_token=access_token,
             expires_in=expires_in,

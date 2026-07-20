@@ -98,6 +98,19 @@ A("users", "username", doc=D, label="Логин", new_type="varchar(150)",
   fe_validations="required; unique (async check); 3..150; без пробелов",
   api_get_index=Y, api_get_single=Y, api_create=Y, api_update=N,
   comments="Смена логина не предусмотрена API §6 (auth).")
+A("users", "email", doc=D + " · ОВ-12 (часть CRUD+email)", label="Email", new_type="varchar(255) NULL",
+  description="Корпоративная почта @npuu.uz, для будущих публичных форм",
+  be_type="String(255)", be_nullable="True",
+  be_db_index="True (частичный UNIQUE uq_users_email_not_null WHERE email IS NOT NULL)",
+  be_other="UNIQUE среди NOT NULL (частичный индекс — несколько NULL не конфликтуют). "
+           "Формат и домен валидирует сервис users: settings.email_domain, дефолт npuu.uz. "
+           "Хранится в нижнем регистре",
+  be_filter="email__icontains",
+  fe_table_view=Y, fe_input_type="email", fe_required="False", fe_max="255",
+  fe_validations="формат email; домен @npuu.uz (конфигурируемый); поле опционально",
+  comments="ОВ-12 реализован ЧАСТИЧНО (решение заказчика): только CRUD пользователей + email. "
+           "Публичные формы, идентификация по email и защита форм — отложены, здесь их нет.",
+  api_get_index=Y, api_get_single=Y, api_create=Y, api_update=Y)
 A("users", "password_hash", doc=D + " · §7 Безопасность", label="Хеш пароля", new_type="varchar(255)",
   description="Argon2id-хеш. НИКОГДА не отдаётся наружу.",
   be_type="String(255)", be_nullable="False", be_editable="False",

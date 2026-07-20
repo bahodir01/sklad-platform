@@ -103,6 +103,12 @@ class Settings(BaseSettings):
     s3_presigned_ttl_seconds: int = 300  # 5 минут (ТЗ §7)
     s3_max_upload_bytes: int = 10 * 1024 * 1024  # 10 МБ
 
+    # ── М7 «Пользователи» (ОВ-12, часть CRUD+email) ──────────────────
+    # Разрешённый домен корпоративной почты. Валидация в modules/users:
+    # email, если задан, обязан быть <local>@<email_domain>. Конфигурируем
+    # намеренно: у заказчика домен npuu.uz, но это настройка, не константа кода.
+    email_domain: str = "npuu.uz"
+
     # ── Пагинация ───────────────────────────────────────────────────
     page_size_default: int = 50
     page_size_max: int = 200

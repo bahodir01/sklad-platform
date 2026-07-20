@@ -12,6 +12,15 @@
 Модель:
     refresh:{jti}  -> family_id | "USED"   TTL = 30 дней
     famrev:{fam}   -> "1"                  TTL = 30 дней (отзыв всей семьи)
+    userfam:{uid}  -> SET{family_id,...}   TTL = 30 дней (семьи пользователя)
+
+userfam — индекс «пользователь → его refresh-семьи» для М7: админ сбросил
+пароль → revoke_all_for_user() гасит ВСЕ сессии пользователя тем же
+механизмом famrev, каким гасится одна семья при детекции кражи. Без этого
+индекса связь user→families в Redis не хранилась нигде (только в подписанных
+токенах на руках у клиентов), и отзыв по пользователю был невозможен.
+Set не чистится от уже истёкших семей до собственного TTL — не страшно:
+famrev по мёртвой семье это no-op, а TTL продлевается при каждом логине.
 
 Отзыв семьи, а не одного токена, — суть детекции: если старый jti предъявлен
 повторно, значит либо его украли, либо украли новый. Кто из двух держателей
@@ -57,9 +66,18 @@ class RefreshTokenStore:
     def new_jti() -> str:
         return uuid.uuid4().hex
 
-    async def register(self, *, jti: str, family_id: str) -> None:
-        """Выданный refresh-токен становится действительным ровно один раз."""
+    async def register(self, *, jti: str, family_id: str, user_id: int | None = None) -> None:
+        """Выданный refresh-токен становится действительным ровно один раз.
+
+        user_id ведёт индекс userfam:{uid} — множество семей пользователя,
+        нужное revoke_all_for_user() (сброс пароля админом, М7). Опционален
+        для обратной совместимости вызовов, где пользователь неизвестен.
+        """
         await self._r.set(f"refresh:{jti}", family_id, ex=_TTL_SECONDS)
+        if user_id is not None:
+            key = f"userfam:{user_id}"
+            await self._r.sadd(key, family_id)
+            await self._r.expire(key, _TTL_SECONDS)
 
     async def is_family_revoked(self, family_id: str) -> bool:
         return await self._r.exists(f"famrev:{family_id}") == 1
@@ -97,6 +115,20 @@ class RefreshTokenStore:
     async def logout(self, *, family_id: str) -> None:
         """Явный выход гасит всю семью: сессия закончилась целиком."""
         await self.revoke_family(family_id)
+
+    async def revoke_all_for_user(self, user_id: int) -> int:
+        """М7, сброс пароля админом: погасить ВСЕ refresh-сессии пользователя.
+
+        Старый пароль скомпрометирован или сотрудник ушёл — живые refresh-
+        токены не должны доживать свои 30 дней. Возвращает число погашенных
+        семей (для лога/аудита).
+        """
+        key = f"userfam:{user_id}"
+        families = await self._r.smembers(key)
+        for family_id in families:
+            await self.revoke_family(str(family_id))
+        await self._r.delete(key)
+        return len(families)
 
 
 class ConsumeResult:

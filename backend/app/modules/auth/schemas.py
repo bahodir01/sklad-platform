@@ -8,6 +8,7 @@
   id            |     ✓     |     ✓      |        |
   full_name     |     ✓     |     ✓      |   ✓    |   ✓
   username      |     ✓     |     ✓      |   ✓    |        ← логин не переименовывается
+  email         |     ✓     |     ✓      |   ✓    |   ✓    ← М7/ОВ-12; домен проверяет сервис users
   password_hash |           |            |        |        ← наружу не выходит НИКОГДА
   role          |     ✓     |     ✓      |   ✓    |   ✓
   category      |     ✓     |     ✓      |   ✓    |   ✓
@@ -31,6 +32,7 @@ class UserList(BaseModel):
     id: int
     full_name: str
     username: str
+    email: str | None
     role: UserRole
     category: UserCategory | None
     is_active: bool
@@ -45,6 +47,7 @@ class UserRead(BaseModel):
     id: int
     full_name: str
     username: str
+    email: str | None
     role: UserRole
     category: UserCategory | None
     is_active: bool
@@ -80,6 +83,9 @@ class UserCreate(BaseModel):
 
     full_name: str = Field(min_length=1, max_length=255)
     username: str = Field(min_length=1, max_length=150)
+    # М7/ОВ-12: формат и домен (@npuu.uz, settings.email_domain) проверяет
+    # СЕРВИС users, не схема: домен — конфигурация, а схема настроек не знает.
+    email: str | None = Field(default=None, max_length=255)
     role: UserRole
     category: UserCategory | None = None
     password: str = Field(min_length=8, max_length=128, repr=False)
@@ -95,9 +101,14 @@ class UserUpdate(BaseModel):
 
     username отсутствует намеренно: контракт даёт ему create=true, update=false.
     password_hash отсутствует: все флаги false.
+
+    INV-9 здесь НЕ проверяется: PATCH частичен, и role без category (или
+    наоборот) в теле легален — инвариант проверяет сервис users по
+    ИТОГОВОМУ состоянию (текущее + патч), где обе половины известны.
     """
 
     full_name: str | None = Field(default=None, min_length=1, max_length=255)
+    email: str | None = Field(default=None, max_length=255)
     role: UserRole | None = None
     category: UserCategory | None = None
     is_active: bool | None = None

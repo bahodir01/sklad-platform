@@ -155,6 +155,56 @@
           }
         },
         {
+          "name": "email",
+          "label": "Email",
+          "new_type": "varchar(255) NULL",
+          "description": "Корпоративная почта @npuu.uz, для будущих публичных форм",
+          "backend": {
+            "type": "String(255)",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "True (частичный UNIQUE uq_users_email_not_null WHERE email IS NOT NULL)",
+            "editable": "",
+            "on_delete": "",
+            "other_validations": "UNIQUE среди NOT NULL (частичный индекс — несколько NULL не конфликтуют). Формат и домен валидирует сервис users: settings.email_domain, дефолт npuu.uz. Хранится в нижнем регистре",
+            "filter": "email__icontains"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "✓",
+            "input_type": "email",
+            "required": "False",
+            "max": "255",
+            "disabled": "",
+            "validations": "формат email; домен @npuu.uz (конфигурируемый); поле опционально"
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": true,
+            "update": true
+          }
+        },
+        {
           "name": "password_hash",
           "label": "Хеш пароля",
           "new_type": "varchar(255)",

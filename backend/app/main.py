@@ -29,6 +29,7 @@ from app.modules.documents.router import router as documents_router
 from app.modules.issuance.router import router as issuance_router
 from app.modules.reports.router import router as reports_router
 from app.modules.stock.router import router as stock_router
+from app.modules.users.router import router as users_router
 
 
 @asynccontextmanager
@@ -81,6 +82,9 @@ app.include_router(reports_router, prefix=settings.api_prefix)
 # М7 «Администрирование»: алерты админ-панели (Q3 заказчика — уведомления внутри
 # панели). Read-only, схему не трогает: алерты выводятся из состояния на лету.
 app.include_router(admin_router, prefix=settings.api_prefix)
+# М7 «Пользователи» (ОВ-12, часть CRUD+email): CRUD учётных записей + email
+# для будущих публичных форм. Публичные формы сами — вне текущего этапа.
+app.include_router(users_router, prefix=settings.api_prefix)
 
 
 @app.get("/health", tags=["ops"], summary="Liveness-проба")
