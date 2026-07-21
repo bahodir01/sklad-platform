@@ -7,4 +7,5 @@
 import type { components } from "./schema";
 
 export type UserRole = components["schemas"]["UserRole"];
+export type UserCategory = components["schemas"]["UserCategory"];
 export type CatalogStatus = components["schemas"]["CatalogStatus"];

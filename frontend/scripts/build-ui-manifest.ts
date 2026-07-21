@@ -26,6 +26,7 @@ import { productFields } from "../src/entities/product/model/fields";
 import { warehouseFields } from "../src/entities/warehouse/model/fields";
 import { expenseTypeFields } from "../src/entities/expense-type/model/fields";
 import { expenseCategoryFields } from "../src/entities/expense-category/model/fields";
+import { userFields } from "../src/entities/user/model/fields";
 
 interface View {
   name: string;
@@ -60,6 +61,10 @@ const ENTITIES: EntityCfg[] = [
     single: "ExpenseCategory",
     plural: "ExpenseCategories",
   },
+  // М7 «Пользователи» (ОВ-12, admin, backend §14). create-поля манифеста
+  // сознательно НЕ включают password — он не колонка (__contract_extra_fields__
+  // на бэке), форма добавляет его вручную вне генерации по дескриптору.
+  { table: "users", fields: userFields, single: "User", plural: "Users" },
 ];
 
 const views: View[] = [];

@@ -23,6 +23,14 @@ export const authKeys = {
   me: ["auth", "me"] as const,
 };
 
+// ── М7 Пользователи (§10, admin, ОВ-12) ─────────────────────────────
+export const userKeys = {
+  all: ["users"] as const,
+  lists: ["users", "list"] as const,
+  list: (params: Record<string, unknown>) => ["users", "list", params] as const,
+  detail: (id: number) => ["users", "detail", id] as const,
+};
+
 // ── М2 Документы (§10, этап 2) ──────────────────────────────────────
 export const documentKeys = {
   notifications: {

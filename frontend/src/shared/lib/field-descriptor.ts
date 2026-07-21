@@ -8,7 +8,7 @@
  * Дрейф между UI и контрактом становится невозможен по построению.
  */
 
-export type InputType = "text" | "number" | "select" | "date" | "checkbox";
+export type InputType = "text" | "number" | "select" | "date" | "checkbox" | "email" | "password";
 
 export interface ApiFlags {
   /** I — приходит в списке. */

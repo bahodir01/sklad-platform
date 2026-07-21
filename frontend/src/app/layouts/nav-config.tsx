@@ -14,6 +14,7 @@ import {
   Coins,
   Send,
   Network,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 import type { UserRole } from "@/shared/api/model-types";
@@ -79,6 +80,10 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Отчёты",
     items: [{ label: "Отчёты", to: ROUTES.reports, icon: BarChart3, roles: ["admin"] }],
+  },
+  {
+    title: "Администрирование",
+    items: [{ label: "Пользователи", to: ROUTES.users, icon: Users, roles: ["admin"] }],
   },
   {
     title: "Справочники",

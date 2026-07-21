@@ -863,6 +863,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Список пользователей (admin) */
+        get: operations["list_users_api_v1_users_get"];
+        put?: never;
+        /**
+         * Создать пользователя (admin)
+         * @description INV-9 (admin ⟺ без категории) — схема+CHECK; email — формат и домен
+         *     @npuu.uz (settings.email_domain); пароль ≥ 8 символов, хеш Argon2id.
+         */
+        post: operations["create_user_api_v1_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Пользователь (admin) */
+        get: operations["get_user_api_v1_users__id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Изменить/деактивировать пользователя (admin)
+         * @description username не меняется (учётная константа). Деактивация — is_active=false
+         *     здесь же (DELETE нет, стиль SV-8). Сам себя админ не деактивирует и не
+         *     разжалует — 422.
+         */
+        patch: operations["update_user_api_v1_users__id__patch"];
+        trace?: never;
+    };
+    "/api/v1/users/{id}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Сбросить пароль пользователя (admin)
+         * @description Новый пароль задаёт админ (мин. 8 символов). Все refresh-сессии
+         *     пользователя гасятся в Redis — старые сессии не переживают сброс.
+         */
+        post: operations["reset_password_api_v1_users__id__reset_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -1697,6 +1763,19 @@ export interface components {
             /** Pages */
             pages: number;
         };
+        /** Page[UserList] */
+        Page_UserList_: {
+            /** Items */
+            items: components["schemas"]["UserList"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Size */
+            size: number;
+            /** Pages */
+            pages: number;
+        };
         /** Page[WarehouseList] */
         Page_WarehouseList_: {
             /** Items */
@@ -1709,6 +1788,18 @@ export interface components {
             size: number;
             /** Pages */
             pages: number;
+        };
+        /**
+         * PasswordResetIn
+         * @description Тело POST /users/{id}/reset-password.
+         *
+         *     Имя без суффиксов Create/Update/Read/List — контрактный валидатор такие
+         *     классы пропускает: password не колонка, таблицы за схемой нет.
+         *     Ограничения — те же, что у password в UserCreate (мин. 8).
+         */
+        PasswordResetIn: {
+            /** Password */
+            password: string;
         };
         /** ProductCreate */
         ProductCreate: {
@@ -2108,6 +2199,44 @@ export interface components {
          */
         UserCategory: "teacher" | "worker";
         /**
+         * UserCreate
+         * @description Поля с api.create = true + password.
+         *
+         *     password — не колонка: в БД лежит только password_hash (Argon2id), у него
+         *     все четыре API-флага false. Схема принимает сырой пароль на вход и никогда
+         *     его не возвращает; хеширование — в сервисе, до записи.
+         */
+        UserCreate: {
+            /** Full Name */
+            full_name: string;
+            /** Username */
+            username: string;
+            /** Email */
+            email?: string | null;
+            role: components["schemas"]["UserRole"];
+            category?: components["schemas"]["UserCategory"] | null;
+            /** Password */
+            password: string;
+        };
+        /**
+         * UserList
+         * @description Строка списка. Поля — те, у которых api.get_index = true.
+         */
+        UserList: {
+            /** Id */
+            id: number;
+            /** Full Name */
+            full_name: string;
+            /** Username */
+            username: string;
+            /** Email */
+            email: string | null;
+            role: components["schemas"]["UserRole"];
+            category: components["schemas"]["UserCategory"] | null;
+            /** Is Active */
+            is_active: boolean;
+        };
+        /**
          * UserRead
          * @description Деталь. Поля — те, у которых api.get_single = true.
          *     created_at отличает её от UserList: get_index=false, get_single=true.
@@ -2119,6 +2248,8 @@ export interface components {
             full_name: string;
             /** Username */
             username: string;
+            /** Email */
+            email: string | null;
             role: components["schemas"]["UserRole"];
             category: components["schemas"]["UserCategory"] | null;
             /** Is Active */
@@ -2135,6 +2266,27 @@ export interface components {
          * @enum {string}
          */
         UserRole: "admin" | "teacher" | "worker";
+        /**
+         * UserUpdate
+         * @description Поля с api.update = true. Все опциональны — семантика PATCH.
+         *
+         *     username отсутствует намеренно: контракт даёт ему create=true, update=false.
+         *     password_hash отсутствует: все флаги false.
+         *
+         *     INV-9 здесь НЕ проверяется: PATCH частичен, и role без category (или
+         *     наоборот) в теле легален — инвариант проверяет сервис users по
+         *     ИТОГОВОМУ состоянию (текущее + патч), где обе половины известны.
+         */
+        UserUpdate: {
+            /** Full Name */
+            full_name?: string | null;
+            /** Email */
+            email?: string | null;
+            role?: components["schemas"]["UserRole"] | null;
+            category?: components["schemas"]["UserCategory"] | null;
+            /** Is Active */
+            is_active?: boolean | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -4366,6 +4518,180 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminAlertsResponse"];
+                };
+            };
+        };
+    };
+    list_users_api_v1_users_get: {
+        parameters: {
+            query?: {
+                /** @description Фильтр по роли */
+                role?: components["schemas"]["UserRole"] | null;
+                /** @description Фильтр по активности */
+                is_active?: boolean | null;
+                /** @description Поиск по ФИО, логину или email (ilike) */
+                q?: string | null;
+                /** @description Номер страницы, с 1 */
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_UserList_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_user_api_v1_users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_api_v1_users__id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Идентификатор пользователя */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_user_api_v1_users__id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Идентификатор пользователя */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_password_api_v1_users__id__reset_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Идентификатор пользователя */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -160,6 +160,43 @@
         "name",
         "status"
       ]
+    },
+    {
+      "name": "UsersTable",
+      "table": "users",
+      "kind": "list",
+      "fields": [
+        "full_name",
+        "username",
+        "email",
+        "role",
+        "category",
+        "is_active"
+      ]
+    },
+    {
+      "name": "UserCreateForm",
+      "table": "users",
+      "kind": "create",
+      "fields": [
+        "full_name",
+        "username",
+        "email",
+        "role",
+        "category"
+      ]
+    },
+    {
+      "name": "UserEditForm",
+      "table": "users",
+      "kind": "update",
+      "fields": [
+        "full_name",
+        "email",
+        "role",
+        "category",
+        "is_active"
+      ]
     }
   ]
 }
