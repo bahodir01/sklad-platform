@@ -35,7 +35,8 @@ import json
 import re
 from typing import Final
 
-import anthropic
+from google import genai
+from google.genai import types as genai_types
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,7 +48,11 @@ from app.modules.catalog.schemas import ProductList
 from app.shared.enums import CatalogStatus
 from app.shared.pagination import Page, PageParams
 
-_AI_MODEL: Final[str] = "claude-haiku-4-5"
+# Google Gemini, не Anthropic (заказчик сменил провайдера ИИ-поиска — см.
+# .feature-dev/15f-gemini-swap.md). flash-lite — дешёвая/быстрая модель:
+# задача мелкая (классификация запроса по короткому списку id/name), полная
+# модель тут не нужна — тот же расчёт, что раньше был за выбором Haiku.
+_AI_MODEL: Final[str] = "gemini-2.5-flash-lite"
 _AI_TIMEOUT_SECONDS: Final[float] = 5.0
 _AI_MAX_CANDIDATES_IN_PROMPT: Final[int] = 500
 _MAX_MATCHES: Final[int] = 5
@@ -100,11 +105,15 @@ async def _all_active_products(session: AsyncSession) -> list[Product]:
 
 
 def _build_ai_prompt(query: str, candidates: list[dict[str, object]]) -> str:
-    """Промпт для Claude Haiku (спека15 §3a).
+    """Промпт для Gemini (спека15 §3a).
 
-    Требует СТРОГО JSON-ответ (список id, 0-5, без пояснений) — парсится
-    программно (``_parse_id_list``); модель ничего не выбирает и не создаёт,
-    только предлагает кандидатов из присланного списка (спека15 §3a).
+    Модель дополнительно принуждена к строгому JSON через structured output
+    (``response_mime_type``/``response_schema`` в ``suggest_products_ai`` —
+    список id, см. ниже), но текст промпта тоже описывает формат словами —
+    на случай, если структурированный вывод по какой-то причине не сработает
+    и ответ придётся разбирать текстом (``_parse_id_list``, тот же фолбэк,
+    что был при Anthropic). Модель ничего не выбирает и не создаёт, только
+    предлагает кандидатов из присланного списка (спека15 §3a).
     """
     candidates_json = json.dumps(candidates, ensure_ascii=False)
     return (
@@ -126,11 +135,13 @@ def _build_ai_prompt(query: str, candidates: list[dict[str, object]]) -> str:
     )
 
 
-def _extract_text(response: "anthropic.types.Message") -> str:
-    for block in response.content:
-        if block.type == "text":
-            return block.text
-    return ""
+def _extract_text(response: "genai_types.GenerateContentResponse") -> str:
+    """``response.text`` у google-genai уже склеивает текстовые части ответа
+    (аналог обхода content-блоков у Anthropic) — но само свойство может
+    бросить, если модель не вернула ни одной текстовой части (например,
+    сработали safety-фильтры), поэтому вызывающий код держит это в
+    ``try/except``, не полагаясь на пустую строку как единственный сигнал."""
+    return response.text or ""
 
 
 def _parse_id_list(text: str) -> list[int]:
@@ -186,13 +197,27 @@ async def suggest_products_ai(
     prompt = _build_ai_prompt(query, payload)
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=api_key)
-        response = await client.with_options(
-            timeout=_AI_TIMEOUT_SECONDS, max_retries=0
-        ).messages.create(
+        client = genai.Client(api_key=api_key)
+        config = genai_types.GenerateContentConfig(
+            # Structured output вместо просьбы «верни строгий JSON» текстом
+            # в промпте — надёжнее текстового парсинга, которым обходился
+            # Anthropic-вариант (модель физически не может вернуть markdown
+            # вокруг массива, если API это поддерживает).
+            response_mime_type="application/json",
+            response_schema=list[int],
+            http_options=genai_types.HttpOptions(
+                # google-genai считает таймаут в миллисекундах.
+                timeout=int(_AI_TIMEOUT_SECONDS * 1000),
+                # Без ретраев — тот же расчёт, что был у Anthropic
+                # (max_retries=0): не растягивать wall-clock повторными
+                # попытками при таймауте/ошибке.
+                retry_options=genai_types.HttpRetryOptions(attempts=1),
+            ),
+        )
+        response = await client.aio.models.generate_content(
             model=_AI_MODEL,
-            max_tokens=256,
-            messages=[{"role": "user", "content": prompt}],
+            contents=prompt,
+            config=config,
         )
     except Exception:
         # Спека15 §3a: сеть/таймаут/невалидный ключ/что угодно → тихо [].

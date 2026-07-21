@@ -14,7 +14,7 @@ const CARDS: { kind: IntegrationKind; title: string; hint: string }[] = [
   {
     kind: "ai_search",
     title: "ИИ-поиск товаров",
-    hint: "API-ключ Anthropic (console.anthropic.com) — используется для поиска товаров по смыслу, если сотрудник написал название на другом языке.",
+    hint: "API-ключ Google Gemini (aistudio.google.com/apikey) — используется для поиска товаров по смыслу, если сотрудник написал название на другом языке.",
   },
 ];
 

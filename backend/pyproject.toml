@@ -52,9 +52,11 @@ dependencies = [
     # сохранением (spec §5а). httpx уже был в [dev] для тестов — здесь нужен
     # рантайму, поэтому продублирован в основных зависимостях.
     "httpx>=0.28",
-    # М-AI «Семантический поиск товара» (спека15 §3a): официальный Anthropic
-    # Python SDK, модель claude-haiku-4-5 — modules/ai/service.py.
-    "anthropic>=0.68",
+    # М-AI «Семантический поиск товара» (спека15 §3a, замена провайдера —
+    # .feature-dev/15f-gemini-swap.md): официальный Google Gen AI Python SDK
+    # (пакет `google-genai`, НЕ устаревший `google-generativeai`), модель
+    # gemini-2.5-flash-lite — modules/ai/service.py.
+    "google-genai>=1.0",
     # Telegram-бот (спека15 §6): отдельный долгоживущий процесс на asyncio,
     # polling-режим — app/bot/. aiogram 3 ложится на существующий async-стек
     # SQLAlchemy без адаптеров.
