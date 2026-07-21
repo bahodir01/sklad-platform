@@ -22,6 +22,7 @@ import { CashExpensesPage } from "@/pages/cash/CashExpensesPage";
 import { MyExpensesPage } from "@/pages/cash/MyExpensesPage";
 import { ReportsPage } from "@/pages/reports/ReportsPage";
 import { UsersPage } from "@/pages/users/UsersPage";
+import { IntegrationsPage } from "@/pages/integrations/IntegrationsPage";
 import { ForbiddenPage } from "@/pages/errors/ForbiddenPage";
 import { NotFoundPage } from "@/pages/errors/NotFoundPage";
 import { ROUTES } from "@/shared/config/routes";
@@ -77,6 +78,7 @@ export const router = createBrowserRouter([
               { path: ROUTES.cashExpenses, element: <CashExpensesPage /> },
               { path: ROUTES.reports, element: <ReportsPage /> },
               { path: ROUTES.users, element: <UsersPage /> },
+              { path: ROUTES.integrations, element: <IntegrationsPage /> },
             ],
           },
 

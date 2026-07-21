@@ -863,6 +863,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Список интеграций (telegram, ai_search) — секрет только маской */
+        get: operations["list_integrations_api_v1_admin_integrations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Сохранить и проверить секрет интеграции — telegram: getMe перед сохранением (невалидный токен → 422, не сохраняется); ai_search: проверка формата ключа */
+        put: operations["update_integration_api_v1_admin_integrations__kind__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/{kind}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Отключить интеграцию (секрет НЕ стирается — повторный PUT включит заново) */
+        post: operations["disable_integration_api_v1_admin_integrations__kind__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -1329,6 +1380,50 @@ export interface components {
              * @description Идентификаторы заявок
              */
             ids: number[];
+        };
+        /**
+         * IntegrationRead
+         * @description `GET /admin/integrations` — секрет отдан только маской.
+         *
+         *     `__contract_table__ = None`: в 02-contract.json у `integration_settings`
+         *     ВСЕ атрибуты помечены `api.create=false`/`api.update=false` (обновление —
+         *     это сервисное действие «проверить и зашифровать», а не прямая запись
+         *     столбца), а `masked_secret` вообще не столбец — это вычисляемое поле
+         *     (расшифровка + маска в `admin/service.py`). Строгая построчная сверка
+         *     get_single-флагов (которая потребовала бы `id`/`updated_by` в этой схеме)
+         *     здесь бессмысленна по той же причине, что и `MoneyExpenseSubmission` в
+         *     `cash/schemas.py`, — это осознанный конверт, а не проекция таблицы.
+         */
+        IntegrationRead: {
+            /** Kind */
+            kind: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Is Enabled */
+            is_enabled: boolean;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Masked Secret
+             * @description Маска секрета (напр. 123456:AAE••••1234); None — секрет ещё не задан
+             */
+            masked_secret?: string | null;
+        };
+        /**
+         * IntegrationUpdate
+         * @description `PUT /admin/integrations/{kind}` — новый секрет (bot-токен / API-ключ).
+         *
+         *     `__contract_table__ = None` (см. `IntegrationRead` выше): `secret` — это
+         *     ВХОДНОЙ открытый текст, который сервис проверяет (Telegram `getMe` / формат
+         *     ключа) и лишь потом шифрует в `secret_encrypted`; прямого столбца `secret`
+         *     не существует, а `secret_encrypted.api.update` в контракте — `false`.
+         */
+        IntegrationUpdate: {
+            /** Secret */
+            secret: string;
         };
         /**
          * IssueResult
@@ -2213,6 +2308,8 @@ export interface components {
             username: string;
             /** Email */
             email?: string | null;
+            /** Phone */
+            phone?: string | null;
             role: components["schemas"]["UserRole"];
             category?: components["schemas"]["UserCategory"] | null;
             /** Password */
@@ -2231,6 +2328,8 @@ export interface components {
             username: string;
             /** Email */
             email: string | null;
+            /** Phone */
+            phone: string | null;
             role: components["schemas"]["UserRole"];
             category: components["schemas"]["UserCategory"] | null;
             /** Is Active */
@@ -2240,6 +2339,8 @@ export interface components {
          * UserRead
          * @description Деталь. Поля — те, у которых api.get_single = true.
          *     created_at отличает её от UserList: get_index=false, get_single=true.
+         *     telegram_chat_id — сервисное поле (пишет только бот, спека15 §2):
+         *     здесь оно read-only, отсутствует в Create/Update.
          */
         UserRead: {
             /** Id */
@@ -2250,6 +2351,8 @@ export interface components {
             username: string;
             /** Email */
             email: string | null;
+            /** Phone */
+            phone: string | null;
             role: components["schemas"]["UserRole"];
             category: components["schemas"]["UserCategory"] | null;
             /** Is Active */
@@ -2259,6 +2362,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Telegram Chat Id */
+            telegram_chat_id: number | null;
         };
         /**
          * UserRole
@@ -2282,6 +2387,8 @@ export interface components {
             full_name?: string | null;
             /** Email */
             email?: string | null;
+            /** Phone */
+            phone?: string | null;
             role?: components["schemas"]["UserRole"] | null;
             category?: components["schemas"]["UserCategory"] | null;
             /** Is Active */
@@ -4518,6 +4625,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminAlertsResponse"];
+                };
+            };
+        };
+    };
+    list_integrations_api_v1_admin_integrations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationRead"][];
+                };
+            };
+        };
+    };
+    update_integration_api_v1_admin_integrations__kind__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IntegrationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_integration_api_v1_admin_integrations__kind__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

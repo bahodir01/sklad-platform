@@ -31,6 +31,11 @@ export const userKeys = {
   detail: (id: number) => ["users", "detail", id] as const,
 };
 
+// ── Спека15 §5а Интеграции (Telegram-бот, ИИ-поиск) ─────────────────
+export const integrationKeys = {
+  all: ["admin", "integrations"] as const,
+};
+
 // ── М2 Документы (§10, этап 2) ──────────────────────────────────────
 export const documentKeys = {
   notifications: {

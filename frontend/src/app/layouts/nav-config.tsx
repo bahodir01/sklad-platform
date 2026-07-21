@@ -15,6 +15,7 @@ import {
   Send,
   Network,
   Users,
+  Plug,
   type LucideIcon,
 } from "lucide-react";
 import type { UserRole } from "@/shared/api/model-types";
@@ -83,7 +84,10 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     title: "Администрирование",
-    items: [{ label: "Пользователи", to: ROUTES.users, icon: Users, roles: ["admin"] }],
+    items: [
+      { label: "Пользователи", to: ROUTES.users, icon: Users, roles: ["admin"] },
+      { label: "Интеграции", to: ROUTES.integrations, icon: Plug, roles: ["admin"] },
+    ],
   },
   {
     title: "Справочники",
