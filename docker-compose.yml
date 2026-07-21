@@ -1,9 +1,19 @@
-# dev-окружение: api, worker, beat, db, redis, minio (архитектура §3).
+# dev-окружение: api, worker, beat, bot, db, redis, minio (архитектура §3).
 #
 # worker + beat (Celery, архитектура §8) добавлены на этапе фоновых задач:
 # worker исполняет очередь (PDF-прогрев, export_report, reconcile_stock,
 # monthly_income_draft, db_backup), beat ставит регламентные задачи по
 # расписанию. nginx (TLS-терминация) остаётся заботой prod-compose.
+#
+# bot (спека15 §6) — Telegram-бот teacher/worker: отдельный долгоживущий
+# asyncio-процесс на polling, НЕ Celery-задача и НЕ часть api-контейнера
+# (см. app/bot/main.py). Токен и is_enabled бот читает из integration_settings
+# (экран «Интеграции», модуль admin) при старте и раз в 30с, пока работает —
+# ВКЛЮЧЕНИЕ/ВЫКЛЮЧЕНИЕ подхватывается без рестарта контейнера. Если админ
+# поменял САМ ТОКЕН на уже запущенном боте — новый токен подхватится только
+# после рестарта контейнера (docker compose restart bot) — задокументированный
+# компромисс (.feature-dev/15d-telegram-bot.md), restart:unless-stopped на
+# случай падения процесса не решает эту часть автоматически.
 #
 # Redis здесь redis:7-alpine — знает и RESP2, и RESP3. redis-py в проекте пиннут
 # <6 (RESP2), что совместимо с Redis 7 и одновременно с Redis 5 в других средах.
@@ -27,6 +37,10 @@ services:
       DATABASE_URL: postgresql+asyncpg://sklad:sklad@db:5432/sklad
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
+      # М7 «Интеграции» (спека15 §5а): ключ шифрования секретов
+      # (Telegram-токен, ключ ИИ-поиска) — ОБЯЗАН совпадать с сервисом bot
+      # ниже, оба расшифровывают один и тот же integration_settings.secret_encrypted.
+      INTEGRATION_SECRET_KEY: ${INTEGRATION_SECRET_KEY:-dev-integration-secret-change-me-in-production-32b}
       ENVIRONMENT: dev
       DEBUG: "true"
       # В dev фронт ходит по http://localhost — Secure-cookie браузер бы не отдал.
@@ -105,6 +119,38 @@ services:
     command: >
       celery -A app.tasks.celery_app:celery_app beat
       --loglevel=INFO --schedule /tmp/celerybeat-schedule
+    restart: unless-stopped
+
+  # ── Telegram-бот (спека15 §6) ──────────────────────────────────────────
+  # polling-режим (без webhook — нет публичного HTTPS в dev/на масштабе
+  # школы). Тот же образ, что api/worker (общий код и модели), НЕ мигрирует
+  # БД и НЕ слушает HTTP/Celery — только long-poll к Telegram Bot API.
+  # INTEGRATION_SECRET_KEY ОБЯЗАН совпадать с api: токен хранится в БД
+  # зашифрованным этим ключом (shared/crypto.py, спека15 §5а) — бот и api
+  # расшифровывают один и тот же secret_encrypted.
+  bot:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sklad:sklad@db:5432/sklad
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
+      INTEGRATION_SECRET_KEY: ${INTEGRATION_SECRET_KEY:-dev-integration-secret-change-me-in-production-32b}
+      ENVIRONMENT: dev
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - ./backend/app:/app/app:ro
+    command: python -m app.bot.main
     restart: unless-stopped
 
   db:

@@ -12,6 +12,7 @@
 
 from app.core.audit import AuditLog
 from app.core.database import Base
+from app.modules.admin.models import IntegrationSetting
 from app.modules.auth.models import User
 from app.modules.cash.models import CashDesk, MoneyExpense, MoneyIncome
 from app.modules.catalog.models import (
@@ -67,9 +68,11 @@ __all__ = [
     "CashDesk",
     "MoneyIncome",
     "MoneyExpense",
-    # М7. Аудит (1)
+    # М7. Аудит + Администрирование (2, +IntegrationSetting — спека15)
     "AuditLog",
+    "IntegrationSetting",
 ]
 
-# 6 + 6 + 2 + 5 + 3 + 1 = 23 таблицы (фича 13 добавила signature_batches) —
-# ровно столько, сколько в 02-contract.json.
+# 6 + 6 + 2 + 5 + 3 + 2 = 24 таблицы (фича 13 добавила signature_batches,
+# спека15 добавила integration_settings) — ровно столько, сколько в
+# 02-contract.json.

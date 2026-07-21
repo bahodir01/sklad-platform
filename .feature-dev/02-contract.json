@@ -205,6 +205,106 @@
           }
         },
         {
+          "name": "phone",
+          "label": "Телефон (Telegram)",
+          "new_type": "varchar(20) NULL",
+          "description": "Телефон сотрудника для привязки Telegram-аккаунта боту. Хранится нормализованным (E.164-подобно, напр. +998901234567) — нормализацию делает сервис users при сохранении.",
+          "backend": {
+            "type": "String(20)",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "True (частичный UNIQUE uq_users_phone_not_null WHERE phone IS NOT NULL)",
+            "editable": "",
+            "on_delete": "",
+            "other_validations": "CHECK (phone IS NULL OR phone ~ '^\\+\\d{9,15}$') ck_users_phone_format — базовая защита от мусора на уровне БД; полную нормализацию (пробелы/скобки/формат ввода админом) делает сервис, не БД",
+            "filter": "phone"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "tel",
+            "required": "False",
+            "max": "20",
+            "disabled": "",
+            "validations": "формат +NNNNNNNNN (9..15 цифр); нормализация на сервере; поле опционально"
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": true,
+            "update": true
+          }
+        },
+        {
+          "name": "telegram_chat_id",
+          "label": "Telegram chat_id",
+          "new_type": "bigint NULL",
+          "description": "chat_id привязанного Telegram-аккаунта. Заполняется ТОЛЬКО ботом в момент успешной привязки по телефону (спека15 §2) — не через обычный API создания/правки пользователя.",
+          "backend": {
+            "type": "BigInteger",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "True (частичный UNIQUE uq_users_telegram_chat_id_not_null WHERE telegram_chat_id IS NOT NULL)",
+            "editable": "",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "telegram_chat_id"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "number",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
           "name": "password_hash",
           "label": "Хеш пароля",
           "new_type": "varchar(255)",
@@ -7382,6 +7482,361 @@
             "on_delete": "",
             "other_validations": "",
             "filter": "created_at__range"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "✓",
+            "input_type": "date",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "integration_settings",
+      "attributes": [
+        {
+          "name": "id",
+          "label": "ID",
+          "new_type": "bigserial",
+          "description": "Суррогатный первичный ключ.",
+          "backend": {
+            "type": "BigInteger",
+            "auto": "autoincrement (Identity)",
+            "unique": "True",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "False",
+            "default": "",
+            "db_index": "True (PK)",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "PRIMARY KEY",
+            "filter": "id"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "number",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "kind",
+          "label": "Тип интеграции",
+          "new_type": "varchar(32) UNIQUE",
+          "description": "telegram | ai_search. Обычный varchar, не enum — набор типов интеграций может расшириться без миграции типа (ALTER TYPE).",
+          "backend": {
+            "type": "String(32)",
+            "auto": "",
+            "unique": "True",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "False",
+            "default": "",
+            "db_index": "True (UNIQUE)",
+            "editable": "",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "kind"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "✓",
+            "input_type": "text",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "secret_encrypted",
+          "label": "Секрет (шифротекст)",
+          "new_type": "text NULL",
+          "description": "Шифротекст секрета (bot token / API key), шифруется симметрично ключом из .env сервисом администрирования. БД шифрованием не занимается — хранит готовый шифротекст.",
+          "backend": {
+            "type": "Text",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": ""
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "password",
+            "required": "False",
+            "max": "",
+            "disabled": "",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": false,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "display_name",
+          "label": "Отображаемое имя",
+          "new_type": "varchar(255) NULL",
+          "description": "Bot username (telegram) или имя модели (ai_search). Ставится сервером после успешной проверки секрета (Telegram getMe / тестовый вызов ai_search).",
+          "backend": {
+            "type": "String(255)",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": ""
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "✓",
+            "input_type": "text",
+            "required": "False",
+            "max": "255",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "is_enabled",
+          "label": "Включена",
+          "new_type": "boolean",
+          "description": "Признак активности интеграции. false по умолчанию, до первой успешной настройки.",
+          "backend": {
+            "type": "Boolean",
+            "auto": "",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "False",
+            "default": "False (server_default=false)",
+            "db_index": "",
+            "editable": "",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "is_enabled"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "False",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "✓",
+            "input_type": "checkbox",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": true,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "updated_by",
+          "label": "Кто изменил",
+          "new_type": "bigint FK NULL",
+          "description": "Администратор, последним менявший настройку. NULL для сид-строк, пока никто не сохранял.",
+          "backend": {
+            "type": "BigInteger · ForeignKey('users.id', ondelete='RESTRICT')",
+            "auto": "",
+            "unique": "",
+            "choice_model": "relationship User",
+            "choice_enum": "",
+            "nullable": "True",
+            "default": "",
+            "db_index": "True (FK)",
+            "editable": "False",
+            "on_delete": "RESTRICT",
+            "other_validations": "",
+            "filter": "updated_by"
+          },
+          "frontend": {
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "",
+            "default": "",
+            "db_index": "",
+            "editable": "",
+            "auto": "",
+            "on_delete": "",
+            "other_validations": "",
+            "table_view": "—",
+            "input_type": "select",
+            "required": "False",
+            "max": "",
+            "disabled": "True",
+            "validations": ""
+          },
+          "legacy": {
+            "old_table_attr": "🆕",
+            "old_attr_orig": "",
+            "old_type": "",
+            "is_new": true
+          },
+          "api": {
+            "get_index": false,
+            "get_single": true,
+            "create": false,
+            "update": false
+          }
+        },
+        {
+          "name": "updated_at",
+          "label": "Изменено",
+          "new_type": "timestamptz",
+          "description": "Момент последнего изменения настройки (создание сид-строки или сохранение секрета).",
+          "backend": {
+            "type": "DateTime(timezone=True)",
+            "auto": "server_default=func.now(), onupdate=func.now()",
+            "unique": "",
+            "choice_model": "",
+            "choice_enum": "",
+            "nullable": "False",
+            "default": "now()",
+            "db_index": "",
+            "editable": "False",
+            "on_delete": "",
+            "other_validations": "",
+            "filter": "updated_at__range"
           },
           "frontend": {
             "unique": "",

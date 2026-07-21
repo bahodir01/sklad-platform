@@ -111,6 +111,31 @@ A("users", "email", doc=D + " · ОВ-12 (часть CRUD+email)", label="Email"
   comments="ОВ-12 реализован ЧАСТИЧНО (решение заказчика): только CRUD пользователей + email. "
            "Публичные формы, идентификация по email и защита форм — отложены, здесь их нет.",
   api_get_index=Y, api_get_single=Y, api_create=Y, api_update=Y)
+A("users", "phone", doc="ТЗ §2 спеки15 (Telegram-бот)", label="Телефон (Telegram)", new_type="varchar(20) NULL",
+  description="Телефон сотрудника для привязки Telegram-аккаунта боту. Хранится нормализованным "
+              "(E.164-подобно, напр. +998901234567) — нормализацию делает сервис users при сохранении.",
+  be_type="String(20)", be_nullable="True",
+  be_db_index="True (частичный UNIQUE uq_users_phone_not_null WHERE phone IS NOT NULL)",
+  be_other=r"CHECK (phone IS NULL OR phone ~ '^\+\d{9,15}$') ck_users_phone_format — "
+           "базовая защита от мусора на уровне БД; полную нормализацию (пробелы/скобки/формат "
+           "ввода админом) делает сервис, не БД",
+  be_filter="phone",
+  fe_table_view=N, fe_input_type="tel", fe_required="False", fe_max="20",
+  fe_validations="формат +NNNNNNNNN (9..15 цифр); нормализация на сервере; поле опционально",
+  comments="Спека15 §2: бот ищет users.phone по contact.phone_number из Telegram при команде /start. "
+           "Заполняет админ через модуль «Пользователи» (create/update); бот в это поле не пишет.",
+  api_get_index=Y, api_get_single=Y, api_create=Y, api_update=Y)
+A("users", "telegram_chat_id", doc="ТЗ §2 спеки15 (Telegram-бот)", label="Telegram chat_id", new_type="bigint NULL",
+  description="chat_id привязанного Telegram-аккаунта. Заполняется ТОЛЬКО ботом в момент успешной "
+              "привязки по телефону (спека15 §2) — не через обычный API создания/правки пользователя.",
+  be_type="BigInteger", be_nullable="True",
+  be_db_index="True (частичный UNIQUE uq_users_telegram_chat_id_not_null WHERE telegram_chat_id IS NOT NULL)",
+  be_filter="telegram_chat_id",
+  fe_table_view=N, fe_input_type="number", fe_required="False", fe_disabled="True",
+  comments="Сервисное поле: один Telegram-аккаунт — один пользователь и наоборот (UNIQUE в обе "
+           "стороны — вместе с users.phone). Пишет только сервис привязки бота (следующий этап), "
+           "api.create = api.update = false.",
+  api_get_index=N, api_get_single=Y, api_create=N, api_update=N)
 A("users", "password_hash", doc=D + " · §7 Безопасность", label="Хеш пароля", new_type="varchar(255)",
   description="Argon2id-хеш. НИКОГДА не отдаётся наружу.",
   be_type="String(255)", be_nullable="False", be_editable="False",
@@ -1082,6 +1107,59 @@ A("audit_log", "created_at", doc=D, label="Когда", new_type="timestamptz",
   be_type="DateTime(timezone=True)", be_auto="server_default=func.now()",
   be_nullable="False", be_default="now()", be_db_index="True (created_at DESC)",
   be_editable="False", be_filter="created_at__range",
+  fe_table_view=Y, fe_input_type="date", fe_required="False", fe_disabled="True",
+  api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
+
+# ── спека15 §5а: экран «Интеграции» (Telegram-бот + ИИ-поиск) ──────────────
+D = "спека15 §5а integration_settings"
+pk("integration_settings", D)
+A("integration_settings", "kind", doc=D, label="Тип интеграции", new_type="varchar(32) UNIQUE",
+  description="telegram | ai_search. Обычный varchar, не enum — набор типов интеграций может "
+              "расшириться без миграции типа (ALTER TYPE).",
+  be_type="String(32)", be_unique="True", be_nullable="False", be_db_index="True (UNIQUE)",
+  be_filter="kind",
+  fe_table_view=Y, fe_input_type="text", fe_required="False", fe_disabled="True",
+  comments="Ровно одна строка на kind — гарантирует UNIQUE. Строки telegram/ai_search сеются "
+           "миграцией 0004 (по аналогии с seed cash_desks в 0001). Новый тип интеграции — отдельная "
+           "миграция с INSERT, как эта; через API kind не создают (api.create=—).",
+  api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
+A("integration_settings", "secret_encrypted", doc=D, label="Секрет (шифротекст)", new_type="text NULL",
+  description="Шифротекст секрета (bot token / API key), шифруется симметрично ключом из .env "
+              "сервисом администрирования. БД шифрованием не занимается — хранит готовый шифротекст.",
+  be_type="Text", be_nullable="True",
+  fe_table_view=N, fe_input_type="password", fe_required="False",
+  comments="NULL, пока интеграция не настроена (сид-строки). НИКОГДА не отдаётся в открытом виде "
+           "ни в одной Pydantic-схеме — Read/Create-схемы для этой таблицы добавляет следующий "
+           "агент вместе с эндпоинтами GET/PUT/POST /admin/integrations (маска наружу, не значение).",
+  api_get_index=N, api_get_single=N, api_create=N, api_update=N)
+A("integration_settings", "display_name", doc=D, label="Отображаемое имя", new_type="varchar(255) NULL",
+  description="Bot username (telegram) или имя модели (ai_search). Ставится сервером после "
+              "успешной проверки секрета (Telegram getMe / тестовый вызов ai_search).",
+  be_type="String(255)", be_nullable="True",
+  fe_table_view=Y, fe_input_type="text", fe_required="False", fe_max="255", fe_disabled="True",
+  api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
+A("integration_settings", "is_enabled", doc=D, label="Включена", new_type="boolean",
+  description="Признак активности интеграции. false по умолчанию, до первой успешной настройки.",
+  be_type="Boolean", be_nullable="False", be_default="False (server_default=false)",
+  be_filter="is_enabled",
+  fe_table_view=Y, fe_input_type="checkbox", fe_required="False", fe_default="False", fe_disabled="True",
+  comments="Переключается сервером через PUT /admin/integrations/{kind} (успешная проверка) и "
+           "POST /admin/integrations/{kind}/disable — не напрямую клиентом.",
+  api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
+A("integration_settings", "updated_by", doc=D, label="Кто изменил", new_type="bigint FK NULL",
+  description="Администратор, последним менявший настройку. NULL для сид-строк, пока никто "
+              "не сохранял.",
+  be_type="BigInteger · ForeignKey('users.id', ondelete='RESTRICT')",
+  be_choice_model="relationship User", be_nullable="True", be_db_index="True (FK)",
+  be_on_delete="RESTRICT", be_editable="False", be_filter="updated_by",
+  fe_table_view=N, fe_input_type="select", fe_required="False", fe_disabled="True",
+  comments="RESTRICT: администратора с историей правок интеграции нельзя физически удалить "
+           "(в системе и так нет физического удаления пользователей, SV-8).",
+  api_get_index=N, api_get_single=Y, api_create=N, api_update=N)
+A("integration_settings", "updated_at", doc=D, label="Изменено", new_type="timestamptz",
+  description="Момент последнего изменения настройки (создание сид-строки или сохранение секрета).",
+  be_type="DateTime(timezone=True)", be_auto="server_default=func.now(), onupdate=func.now()",
+  be_nullable="False", be_default="now()", be_editable="False", be_filter="updated_at__range",
   fe_table_view=Y, fe_input_type="date", fe_required="False", fe_disabled="True",
   api_get_index=Y, api_get_single=Y, api_create=N, api_update=N)
 

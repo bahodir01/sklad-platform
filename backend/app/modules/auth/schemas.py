@@ -3,17 +3,19 @@
 Состав каждой схемы определяют API-флаги 02-contract.json → таблица users,
 БУКВАЛЬНО:
 
-  атрибут       | get_index | get_single | create | update
-  --------------|-----------|------------|--------|-------
-  id            |     ✓     |     ✓      |        |
-  full_name     |     ✓     |     ✓      |   ✓    |   ✓
-  username      |     ✓     |     ✓      |   ✓    |        ← логин не переименовывается
-  email         |     ✓     |     ✓      |   ✓    |   ✓    ← М7/ОВ-12; домен проверяет сервис users
-  password_hash |           |            |        |        ← наружу не выходит НИКОГДА
-  role          |     ✓     |     ✓      |   ✓    |   ✓
-  category      |     ✓     |     ✓      |   ✓    |   ✓
-  is_active     |     ✓     |     ✓      |        |   ✓    ← ставится только через update
-  created_at    |           |     ✓      |        |        ← только в детали
+  атрибут           | get_index | get_single | create | update
+  ------------------|-----------|------------|--------|-------
+  id                |     ✓     |     ✓      |        |
+  full_name         |     ✓     |     ✓      |   ✓    |   ✓
+  username          |     ✓     |     ✓      |   ✓    |        ← логин не переименовывается
+  email             |     ✓     |     ✓      |   ✓    |   ✓    ← М7/ОВ-12; домен проверяет сервис users
+  phone             |     ✓     |     ✓      |   ✓    |   ✓    ← спека15 §2, привязка Telegram-бота
+  password_hash     |           |            |        |        ← наружу не выходит НИКОГДА
+  role              |     ✓     |     ✓      |   ✓    |   ✓
+  category          |     ✓     |     ✓      |   ✓    |   ✓
+  is_active         |     ✓     |     ✓      |        |   ✓    ← ставится только через update
+  created_at        |           |     ✓      |        |        ← только в детали
+  telegram_chat_id  |           |     ✓      |        |        ← сервисное, пишет только бот
 """
 
 import datetime as dt
@@ -22,6 +24,11 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.shared.enums import UserCategory, UserRole
+
+# спека15 §2: тот же формат, что ck_users_phone_format в БД (только цифры
+# с ведущим '+', 9..15 цифр). Дубль здесь — не защита (её даёт CHECK), а
+# внятная ошибка валидации вместо 500 от IntegrityError.
+PHONE_PATTERN = r"^\+\d{9,15}$"
 
 
 class UserList(BaseModel):
@@ -33,6 +40,7 @@ class UserList(BaseModel):
     full_name: str
     username: str
     email: str | None
+    phone: str | None
     role: UserRole
     category: UserCategory | None
     is_active: bool
@@ -40,7 +48,9 @@ class UserList(BaseModel):
 
 class UserRead(BaseModel):
     """Деталь. Поля — те, у которых api.get_single = true.
-    created_at отличает её от UserList: get_index=false, get_single=true."""
+    created_at отличает её от UserList: get_index=false, get_single=true.
+    telegram_chat_id — сервисное поле (пишет только бот, спека15 §2):
+    здесь оно read-only, отсутствует в Create/Update."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -48,10 +58,12 @@ class UserRead(BaseModel):
     full_name: str
     username: str
     email: str | None
+    phone: str | None
     role: UserRole
     category: UserCategory | None
     is_active: bool
     created_at: dt.datetime
+    telegram_chat_id: int | None
 
 
 def _validate_inv9(role: UserRole | None, category: UserCategory | None) -> None:
@@ -86,6 +98,10 @@ class UserCreate(BaseModel):
     # М7/ОВ-12: формат и домен (@npuu.uz, settings.email_domain) проверяет
     # СЕРВИС users, не схема: домен — конфигурация, а схема настроек не знает.
     email: str | None = Field(default=None, max_length=255)
+    # спека15 §2: телефон для привязки Telegram-бота. Нормализацию
+    # (пробелы/скобки/локальные форматы ввода) делает сервис users при
+    # сохранении — здесь только формат-заслон, зеркалящий CHECK в БД.
+    phone: str | None = Field(default=None, max_length=20, pattern=PHONE_PATTERN)
     role: UserRole
     category: UserCategory | None = None
     password: str = Field(min_length=8, max_length=128, repr=False)
@@ -109,6 +125,7 @@ class UserUpdate(BaseModel):
 
     full_name: str | None = Field(default=None, min_length=1, max_length=255)
     email: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=20, pattern=PHONE_PATTERN)
     role: UserRole | None = None
     category: UserCategory | None = None
     is_active: bool | None = None

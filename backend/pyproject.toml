@@ -45,6 +45,20 @@ dependencies = [
     # Экспорт отчётов в Excel (ТЗ §8.1.1/§8.2, М6). openpyxl — чистый Python, без
     # нативных зависимостей; PDF-ветку экспорта делает WeasyPrint (выше).
     "openpyxl>=3.1",
+    # М7 «Интеграции» (спека15 §5а): симметричное шифрование секретов
+    # (Telegram-токен, ключ ИИ-поиска) ключом из .env — shared/crypto.py.
+    "cryptography>=43",
+    # М7 «Интеграции»: проверка Telegram-токена вызовом Bot API `getMe` перед
+    # сохранением (spec §5а). httpx уже был в [dev] для тестов — здесь нужен
+    # рантайму, поэтому продублирован в основных зависимостях.
+    "httpx>=0.28",
+    # М-AI «Семантический поиск товара» (спека15 §3a): официальный Anthropic
+    # Python SDK, модель claude-haiku-4-5 — modules/ai/service.py.
+    "anthropic>=0.68",
+    # Telegram-бот (спека15 §6): отдельный долгоживущий процесс на asyncio,
+    # polling-режим — app/bot/. aiogram 3 ложится на существующий async-стек
+    # SQLAlchemy без адаптеров.
+    "aiogram>=3",
 ]
 
 [project.optional-dependencies]

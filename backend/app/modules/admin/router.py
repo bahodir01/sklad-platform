@@ -32,6 +32,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
 from app.core.security import require_admin
+from app.modules.admin.schemas import IntegrationRead, IntegrationUpdate
+from app.modules.admin.service import IntegrationService
+from app.modules.auth.models import User
 
 router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -117,3 +120,56 @@ async def admin_alerts(
         )
 
     return AdminAlertsResponse(alerts=alerts, count=len(alerts))
+
+
+# ══════════════════════ М7 «Интеграции» (спека15 §5а) ═══════════════
+#
+# Единое место внешних ключей: Telegram-бот и ИИ-поиск товара, по одной
+# строке в integration_settings на kind (модель — modules/admin/models.py,
+# миграция 0004, обе строки засеяны выключенными). Секрет — только зашифрован
+# (shared/crypto.py, ключ INTEGRATION_SECRET_KEY из .env) и никогда не
+# возвращается в открытом виде — GET отдаёт masked_secret.
+
+
+@router.get(
+    "/admin/integrations",
+    response_model=list[IntegrationRead],
+    summary="Список интеграций (telegram, ai_search) — секрет только маской",
+)
+async def list_integrations(
+    session: AsyncSession = Depends(get_session),
+) -> list[IntegrationRead]:
+    return await IntegrationService(session).list_all()
+
+
+@router.put(
+    "/admin/integrations/{kind}",
+    response_model=IntegrationRead,
+    summary=(
+        "Сохранить и проверить секрет интеграции — telegram: getMe перед "
+        "сохранением (невалидный токен → 422, не сохраняется); ai_search: "
+        "проверка формата ключа"
+    ),
+)
+async def update_integration(
+    kind: str,
+    payload: IntegrationUpdate,
+    user: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> IntegrationRead:
+    return await IntegrationService(session).update_secret(
+        kind, payload.secret, admin_id=user.id
+    )
+
+
+@router.post(
+    "/admin/integrations/{kind}/disable",
+    response_model=IntegrationRead,
+    summary="Отключить интеграцию (секрет НЕ стирается — повторный PUT включит заново)",
+)
+async def disable_integration(
+    kind: str,
+    user: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> IntegrationRead:
+    return await IntegrationService(session).disable(kind, admin_id=user.id)

@@ -79,6 +79,15 @@ class Settings(BaseSettings):
     refresh_token_ttl_days: int = 30
     jwt_issuer: str = "sklad-api"
 
+    # ── Шифрование секретов интеграций (спека15 §5а) ─────────────────
+    # Telegram-токен и ключ ИИ-поиска хранятся в integration_settings
+    # зашифрованными (Fernet-ключ, производный от этой строки — см.
+    # shared/crypto.py), тем же принципом, что jwt_secret выше: секрет живёт
+    # в .env, не в схеме БД и не хардкодом. ОБЯЗАТЕЛЬНО заменить в prod.
+    integration_secret_key: str = Field(
+        default="CHANGE-ME-IN-PRODUCTION-INTEGRATION-KEY-32B", min_length=32
+    )
+
     # ── Refresh-cookie ──────────────────────────────────────────────
     refresh_cookie_name: str = "refresh_token"
     refresh_cookie_path: str = "/api/v1/auth"
